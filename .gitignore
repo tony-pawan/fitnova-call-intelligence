@@ -52,3 +52,8 @@ storage/processed/*
 
 # System & diagnostic logs
 *.log
+
+# Root level audio formats
+*.mp3
+*.wav
+*.m4a

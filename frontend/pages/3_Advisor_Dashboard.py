@@ -1,10 +1,15 @@
 import os
+import sys
+
+# Ensure project root is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from sqlalchemy.orm import Session
-from backend.app.database.session import SessionLocal
-from backend.app.services.dashboard_service import DashboardService
+import plotly.express as px  # pyrefly: ignore [missing-import]
+from sqlalchemy.orm import Session  # pyrefly: ignore [missing-import]
+from backend.app.database.session import SessionLocal  # pyrefly: ignore [missing-import]
+from backend.app.services.dashboard_service import DashboardService  # pyrefly: ignore [missing-import]
 from frontend.sidebar import render_sidebar
 
 st.set_page_config(

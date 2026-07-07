@@ -1,7 +1,12 @@
 import streamlit as st
 import os
-from backend.app.services.dashboard_service import DashboardService
-from backend.app.database.session import SessionLocal
+import sys
+
+# Ensure project root is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from backend.app.services.dashboard_service import DashboardService  # pyrefly: ignore [missing-import]
+from backend.app.database.session import SessionLocal  # pyrefly: ignore [missing-import]
 
 def render_sidebar():
     """

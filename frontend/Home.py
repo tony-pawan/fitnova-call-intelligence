@@ -1,7 +1,12 @@
 import os
+import sys
+
+# Ensure project root is in sys.path for module resolution
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import streamlit as st
 import pandas as pd
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session  # pyrefly: ignore [missing-import]
 from backend.app.database.session import SessionLocal
 from backend.app.services.dashboard_service import DashboardService
 from backend.app.models.call import CallStatus
