@@ -28,7 +28,8 @@ class FasterWhisperTranscriber(Transcriber):
                 cls._model_instance = WhisperModel(
                     model_size,
                     device=device,
-                    compute_type=compute_type
+                    compute_type=compute_type,
+                    cpu_threads=4
                 )
                 logger.info("Faster Whisper model loaded successfully")
             except Exception as e:
@@ -55,7 +56,7 @@ class FasterWhisperTranscriber(Transcriber):
         try:
             segments_generator, info = model.transcribe(
                 audio_path,
-                beam_size=5,
+                beam_size=2,
                 vad_filter=True,
                 vad_parameters=dict(min_speech_duration_ms=250)
             )
