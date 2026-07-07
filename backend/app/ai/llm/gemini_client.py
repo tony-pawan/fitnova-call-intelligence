@@ -1,0 +1,97 @@
+import json
+import google.generativeai as genai  # pyrefly: ignore [missing-import]
+from backend.app.core.config import settings
+from backend.app.core.logging import get_logger
+
+logger = get_logger("ANALYSIS")
+
+class GeminiClient:
+    _configured = False
+
+    @classmethod
+    def configure(cls) -> None:
+        """
+        Configures the google.generativeai API connection exactly once.
+        """
+        if not cls._configured:
+            api_key = settings.GEMINI_API_KEY
+            if api_key and api_key != "mock_key_for_development":
+                logger.info("Initializing Google Generative AI with configured API Key")
+                genai.configure(api_key=api_key)
+            else:
+                logger.info("Configuring GeminiClient in mock/development mode")
+            cls._configured = True
+
+    def generate(self, prompt: str, schema_json_desc: str = None) -> str:
+        """
+        Submits generative content query request payload to Gemini API.
+        If the API key is mock or missing, it returns deterministic JSON matching
+        the target analyzer's schema representation to allow offline test execution.
+        """
+        self.configure()
+        api_key = settings.GEMINI_API_KEY
+
+        # Fallback Mode for Tests and Development
+        if not api_key or api_key == "mock_key_for_development":
+            logger.info("Executing client generation in mock/fallback mode")
+            prompt_lower = prompt.lower()
+            
+            # Check for unique strings in the prompt templates to prevent collision with transcript text
+            if "needs discovery evaluations" in prompt_lower:
+                return json.dumps({
+                    "score": 82.0,
+                    "summary": "Mock needs discovery score: The advisor asked relevant questions but missed budget validation.",
+                    "strengths": ["Asked about specific business goals", "Professional introduction"],
+                    "weaknesses": ["Missed budget range questions", "Timeline not clarified"],
+                    "recommendations": ["Incorporate explicit budget discovery steps"],
+                    "issue_tags": ["Missing Budget Discovery"]
+                })
+            elif "script compliance" in prompt_lower:
+                return json.dumps({
+                    "score": 95.0,
+                    "summary": "Mock compliance score: Advisor successfully read standard terms and verified identity.",
+                    "strengths": ["Read compliance disclosures perfectly", "Verified customer caller identity"],
+                    "weaknesses": [],
+                    "recommendations": ["Continue following script guidelines"],
+                    "issue_tags": []
+                })
+            elif "sales techniques and quality" in prompt_lower:
+                return json.dumps({
+                    "score": 75.0,
+                    "summary": "Mock sales quality score: Advisor had energetic pacing but lacked firm closing.",
+                    "strengths": ["Maintained clear call pacing and energetic tone"],
+                    "weaknesses": ["Weak objection handling on price", "No clear call-to-action closing"],
+                    "recommendations": ["Provide objection handling guidelines for team"],
+                    "issue_tags": ["Weak Objection Handling"]
+                })
+            else:
+                # Generic JSON fallback
+                return json.dumps({
+                    "score": 80.0,
+                    "summary": "Generic mock analysis output.",
+                    "strengths": ["General compliance"],
+                    "weaknesses": [],
+                    "recommendations": [],
+                    "issue_tags": []
+                })
+
+        # Real API Invocations
+        try:
+            logger.info("[ANALYSIS] Gemini request started")
+            model = genai.GenerativeModel(settings.GEMINI_MODEL)
+            
+            config = {
+                "temperature": settings.TEMPERATURE,
+                "max_output_tokens": settings.MAX_OUTPUT_TOKENS,
+            }
+            if schema_json_desc:
+                config["response_mime_type"] = "application/json"
+
+            response = model.generate_content(
+                prompt,
+                generation_config=config
+            )
+            return response.text
+        except Exception as e:
+            logger.error(f"Gemini API request failed: {e}")
+            raise RuntimeError(f"Generative API failed: {e}")

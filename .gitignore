@@ -1,0 +1,54 @@
+# Python cache & compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment configurations & secrets
+.env
+.env.local
+.env.*.local
+
+# IDE configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# SQLite databases
+*.db
+*.sqlite
+
+# Generated storage artifacts (exclude .gitkeep files to preserve directories)
+storage/audio/*
+!storage/audio/.gitkeep
+
+storage/transcripts/*
+!storage/transcripts/.gitkeep
+
+storage/conversations/*
+!storage/conversations/.gitkeep
+
+storage/analysis/*
+!storage/analysis/.gitkeep
+
+storage/processed/*
+!storage/processed/.gitkeep
+
+# System & diagnostic logs
+*.log
