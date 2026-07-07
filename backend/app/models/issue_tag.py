@@ -7,7 +7,6 @@ from backend.app.database.base import Base
 
 if TYPE_CHECKING:
     from backend.app.models.analysis import CallAnalysis
-    from backend.app.models.appeal import Appeal
 
 class Severity(str, enum.Enum):
     Low = "Low"
@@ -47,9 +46,3 @@ class IssueTag(Base):
 
     # Relationships
     analysis: Mapped["CallAnalysis"] = relationship("CallAnalysis", back_populates="issue_tags")
-    
-    appeals: Mapped[List["Appeal"]] = relationship(
-        "Appeal", 
-        back_populates="issue_tag", 
-        cascade="all, delete-orphan"
-    )

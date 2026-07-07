@@ -3,7 +3,6 @@ from fastapi import UploadFile, HTTPException, BackgroundTasks  # type: ignore
 from sqlalchemy.orm import Session  # type: ignore
 
 from backend.app.models.call import Call, CallStatus
-from backend.app.models.advisor import Advisor
 from backend.app.utils.storage import StorageManager
 from backend.app.utils.metadata import extract_audio_metadata
 from backend.app.core.logging import get_logger
@@ -17,7 +16,6 @@ class UploadService:
     def upload_call(
         self,
         db: Session,
-        advisor_id: int,
         audio_file: UploadFile,
         background_tasks: BackgroundTasks
     ) -> Call:
@@ -31,12 +29,6 @@ class UploadService:
         if not audio_file or not audio_file.filename:
             logger.error("[UPLOAD] Missing file in request")
             raise HTTPException(status_code=400, detail="Missing audio file in request")
-
-        # 2. Validate advisor exists in the database
-        advisor = db.query(Advisor).filter(Advisor.id == advisor_id).first()
-        if not advisor:
-            logger.error(f"[UPLOAD] Invalid advisor: {advisor_id}")
-            raise HTTPException(status_code=404, detail=f"Advisor with ID {advisor_id} not found")
 
         # 3. Validate supported extension (.wav, .mp3, .m4a)
         filename = audio_file.filename
@@ -81,7 +73,6 @@ class UploadService:
         logger.info("[UPLOAD] Database record created")
         try:
             db_call = Call(
-                advisor_id=advisor_id,
                 original_filename=filename,
                 stored_filename=storage_meta["stored_filename"],
                 audio_path=audio_path,

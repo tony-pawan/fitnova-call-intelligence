@@ -6,7 +6,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship  # pyrefly: ignor
 from backend.app.database.base import Base  # pyrefly: ignore [missing-import]
 
 if TYPE_CHECKING:
-    from backend.app.models.advisor import Advisor
     from backend.app.models.transcript import TranscriptSegment
     from backend.app.models.analysis import CallAnalysis
 
@@ -21,11 +20,6 @@ class Call(Base):
     __tablename__ = "calls"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    advisor_id: Mapped[int] = mapped_column(
-        ForeignKey("advisors.id", ondelete="CASCADE"), 
-        nullable=False, 
-        index=True
-    )
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     stored_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     audio_path: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -52,8 +46,6 @@ class Call(Base):
     )
 
     # Relationships
-    advisor: Mapped["Advisor"] = relationship("Advisor", back_populates="calls")
-    
     transcript_segments: Mapped[List["TranscriptSegment"]] = relationship(
         "TranscriptSegment", 
         back_populates="call", 

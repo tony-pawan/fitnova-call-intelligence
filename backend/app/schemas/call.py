@@ -4,7 +4,6 @@ from backend.app.models.call import CallStatus
 from backend.app.schemas.common import BaseSchema, TimestampSchema
 
 class CallBase(BaseSchema):
-    advisor_id: int
     original_filename: str = Field(..., min_length=1, max_length=255)
     stored_filename: str = Field(..., min_length=1, max_length=255)
     audio_path: str = Field(..., min_length=1, max_length=1024, description="File path to the audio file")
@@ -18,7 +17,6 @@ class CallCreate(CallBase):
     pass
 
 class CallUpdate(BaseSchema):
-    advisor_id: Optional[int] = Field(None)
     original_filename: Optional[str] = Field(None, min_length=1, max_length=255)
     stored_filename: Optional[str] = Field(None, min_length=1, max_length=255)
     audio_path: Optional[str] = Field(None, min_length=1, max_length=1024)

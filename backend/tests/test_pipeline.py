@@ -4,7 +4,6 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient  # pyrefly: ignore [missing-import]
 from backend.app.main import app
 from backend.app.database.session import SessionLocal
-from backend.app.models.advisor import Advisor
 from backend.app.models.call import Call, CallStatus
 from backend.app.utils.timeline import get_pipeline_timeline
 
@@ -42,17 +41,11 @@ def db_session():
     finally:
         db.close()
 
-@pytest.fixture(scope="module")
-def existing_advisor(db_session):
-    return db_session.query(Advisor).first()
-
-def test_pipeline_success(existing_advisor) -> None:
+def test_pipeline_success() -> None:
     """
     Verifies that a successful upload triggers the background processing task,
     running through intermediate states and ending up as Completed.
     """
-    assert existing_advisor is not None
-    
     file_content = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x22\x56\x00\x00\x44\xAC\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     
     # Mock extract_audio_metadata to bypass mutagen check
@@ -63,10 +56,9 @@ def test_pipeline_success(existing_advisor) -> None:
         with patch("backend.app.pipeline.call_processor.CallProcessor._transcribe") as mock_trans, \
              patch("backend.app.pipeline.call_processor.CallProcessor._diarize") as mock_diarize, \
              patch("backend.app.pipeline.call_processor.CallProcessor._analyze") as mock_analyze:
-                 
+                  
             response = client.post(
                 "/calls/upload",
-                data={"advisor_id": existing_advisor.id},
                 files={"audio_file": ("pipeline_ok.wav", file_content, "audio/wav")}
             )
             
@@ -91,13 +83,11 @@ def test_pipeline_success(existing_advisor) -> None:
             assert "Processing Started" in events
             assert "Completed" in events
 
-def test_pipeline_failure_handling(existing_advisor) -> None:
+def test_pipeline_failure_handling() -> None:
     """
     Verifies that if any step inside the pipeline raises an exception,
     the pipeline intercepts it, changes status to Failed, and logs timeline/exceptions.
     """
-    assert existing_advisor is not None
-    
     file_content = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x22\x56\x00\x00\x44\xAC\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     
     with patch("backend.app.services.upload_service.extract_audio_metadata") as mock_extract:
@@ -107,7 +97,6 @@ def test_pipeline_failure_handling(existing_advisor) -> None:
         with patch("backend.app.pipeline.call_processor.CallProcessor._transcribe", side_effect=ValueError("Mock transcription failure")):
             response = client.post(
                 "/calls/upload",
-                data={"advisor_id": existing_advisor.id},
                 files={"audio_file": ("pipeline_err.wav", file_content, "audio/wav")}
             )
             

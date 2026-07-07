@@ -1,38 +1,36 @@
 from backend.app.database.session import SessionLocal
-from backend.app.models.organization import Organization
-from backend.app.models.team import Team
-from backend.app.models.advisor import Advisor
+from backend.app.database.database import engine
+from backend.app.database.base import Base
+from backend.app.models.call import Call
+from backend.app.models.analysis import CallAnalysis
+from backend.app.models.transcript import TranscriptSegment
+from backend.app.models.issue_tag import IssueTag
 
-def test_db_seeded_data() -> None:
+def test_db_empty_initial_state() -> None:
     """
-    Verifies that the database has been successfully seeded with organizations, 
-    teams, and advisors, and that relationships are valid.
+    Verifies that the database is successfully connected and initializes in a clean,
+    empty state (zero records exist).
     """
+    # Drop and recreate tables to guarantee empty state
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
     db = SessionLocal()
     try:
-        # Check Organization
-        org = db.query(Organization).filter(Organization.name == "FitNova").first()
-        assert org is not None
-        assert org.name == "FitNova"
+        # Check Call
+        calls = db.query(Call).all()
+        assert len(calls) == 0
 
-        # Check Teams associated with Org
-        teams = db.query(Team).filter(Team.organization_id == org.id).all()
-        assert len(teams) == 2
-        team_names = {team.name for team in teams}
-        assert "Team Alpha" in team_names
-        assert "Team Beta" in team_names
+        # Check CallAnalysis
+        analyses = db.query(CallAnalysis).all()
+        assert len(analyses) == 0
 
-        # Check Advisors
-        advisors = db.query(Advisor).all()
-        assert len(advisors) == 4
-        advisor_names = {adv.name for adv in advisors}
-        assert {"Rahul", "Priya", "Arjun", "Sneha"}.issubset(advisor_names)
-        
-        # Verify relationship references
-        for team in teams:
-            assert len(team.advisors) == 2
-            for advisor in team.advisors:
-                assert advisor.team_id == team.id
-                assert advisor.email is not None
+        # Check TranscriptSegment
+        segments = db.query(TranscriptSegment).all()
+        assert len(segments) == 0
+
+        # Check IssueTag
+        tags = db.query(IssueTag).all()
+        assert len(tags) == 0
     finally:
         db.close()

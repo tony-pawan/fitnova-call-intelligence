@@ -7,7 +7,6 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient  # pyrefly: ignore [missing-import]
 from backend.app.main import app
 from backend.app.database.session import SessionLocal
-from backend.app.models.advisor import Advisor
 from backend.app.models.call import Call, CallStatus
 from backend.app.models.transcript import TranscriptSegment
 from backend.app.ai.pyannote_diarizer import PyannoteDiarizer
@@ -73,10 +72,6 @@ def db_session():
     finally:
         db.close()
 
-@pytest.fixture(scope="module")
-def existing_advisor(db_session):
-    return db_session.query(Advisor).first()
-
 def generate_wav(path: str, duration: float = 1.0) -> None:
     sample_rate = 16000
     with wave.open(path, "wb") as w:
@@ -126,12 +121,10 @@ def test_diarize_corrupted_transcript() -> None:
     if os.path.exists(temp_path):
         os.remove(temp_path)
 
-def test_diarize_two_speakers(existing_advisor) -> None:
+def test_diarize_two_speakers() -> None:
     """
     Verifies end-to-end diarization and conversation mapping logic for two-speaker files.
     """
-    assert existing_advisor is not None
-    
     os.makedirs("./storage/test_diarize", exist_ok=True)
     audio_path = "./storage/test_diarize/two_speakers.wav"
     generate_wav(audio_path, duration=4.0)
@@ -156,7 +149,6 @@ def test_diarize_two_speakers(existing_advisor) -> None:
             with open(audio_path, "rb") as f:
                 response = client.post(
                     "/calls/upload",
-                    data={"advisor_id": existing_advisor.id},
                     files={"audio_file": ("two_speakers.wav", f, "audio/wav")}
                 )
                 
@@ -189,11 +181,10 @@ def test_diarize_two_speakers(existing_advisor) -> None:
     if os.path.exists(audio_path):
         os.remove(audio_path)
 
-def test_diarize_single_speaker(existing_advisor) -> None:
+def test_diarize_single_speaker() -> None:
     """
     Verifies mapping logic fallback when only one speaker is detected.
     """
-    assert existing_advisor is not None
     os.makedirs("./storage/test_diarize", exist_ok=True)
     audio_path = "./storage/test_diarize/single_speaker.wav"
     generate_wav(audio_path, duration=4.0)
@@ -215,7 +206,6 @@ def test_diarize_single_speaker(existing_advisor) -> None:
             with open(audio_path, "rb") as f:
                 response = client.post(
                     "/calls/upload",
-                    data={"advisor_id": existing_advisor.id},
                     files={"audio_file": ("single_speaker.wav", f, "audio/wav")}
                 )
                 
@@ -236,11 +226,10 @@ def test_diarize_single_speaker(existing_advisor) -> None:
     if os.path.exists(audio_path):
         os.remove(audio_path)
 
-def test_diarize_multi_speakers(existing_advisor) -> None:
+def test_diarize_multi_speakers() -> None:
     """
     Checks that multi-speaker files (3+) are mapped correctly (Advisor, Customer, Speaker 3).
     """
-    assert existing_advisor is not None
     os.makedirs("./storage/test_diarize", exist_ok=True)
     audio_path = "./storage/test_diarize/multi_speaker.wav"
     generate_wav(audio_path, duration=4.5)
@@ -264,7 +253,6 @@ def test_diarize_multi_speakers(existing_advisor) -> None:
             with open(audio_path, "rb") as f:
                 response = client.post(
                     "/calls/upload",
-                    data={"advisor_id": existing_advisor.id},
                     files={"audio_file": ("multi_speaker.wav", f, "audio/wav")}
                 )
                 
@@ -287,11 +275,10 @@ def test_diarize_multi_speakers(existing_advisor) -> None:
     if os.path.exists(audio_path):
         os.remove(audio_path)
 
-def test_diarize_silent_audio(existing_advisor) -> None:
+def test_diarize_silent_audio() -> None:
     """
     Checks mapping defaults when no speakers are detected.
     """
-    assert existing_advisor is not None
     os.makedirs("./storage/test_diarize", exist_ok=True)
     audio_path = "./storage/test_diarize/silent_diarize.wav"
     generate_wav(audio_path, duration=2.0)
@@ -313,7 +300,6 @@ def test_diarize_silent_audio(existing_advisor) -> None:
             with open(audio_path, "rb") as f:
                 response = client.post(
                     "/calls/upload",
-                    data={"advisor_id": existing_advisor.id},
                     files={"audio_file": ("silent_diarize.wav", f, "audio/wav")}
                 )
                 

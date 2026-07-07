@@ -8,7 +8,6 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient  # pyrefly: ignore [missing-import]
 from backend.app.main import app
 from backend.app.database.session import SessionLocal
-from backend.app.models.advisor import Advisor
 from backend.app.models.call import Call, CallStatus
 from backend.app.models.analysis import CallAnalysis
 from backend.app.models.issue_tag import IssueTag
@@ -51,10 +50,6 @@ def db_session():
     finally:
         db.close()
 
-@pytest.fixture(scope="module")
-def existing_advisor(db_session):
-    return db_session.query(Advisor).first()
-
 def generate_wav(path: str, duration: float = 1.0) -> None:
     sample_rate = 16000
     with wave.open(path, "wb") as w:
@@ -67,12 +62,11 @@ def generate_wav(path: str, duration: float = 1.0) -> None:
             val = int(32767.0 * math.sin(2.0 * math.pi * 440.0 * t))
             w.writeframesraw(struct.pack("<h", val))
 
-def test_analysis_success(existing_advisor) -> None:
+def test_analysis_success() -> None:
     """
     Verifies that a complete pipeline run automatically triggers Gemini analysis,
     generates database records, and creates versioned JSON scorecards.
     """
-    assert existing_advisor is not None
     os.makedirs("./storage/test_analysis", exist_ok=True)
     audio_path = "./storage/test_analysis/success_analysis.wav"
     generate_wav(audio_path, duration=4.0)
@@ -98,7 +92,6 @@ def test_analysis_success(existing_advisor) -> None:
         with open(audio_path, "rb") as f:
             response = client.post(
                 "/calls/upload",
-                data={"advisor_id": existing_advisor.id},
                 files={"audio_file": ("success_analysis.wav", f, "audio/wav")}
             )
             
@@ -175,12 +168,11 @@ def test_analysis_json_repair_retry() -> None:
     # Assert get_pipeline called twice (first generate, second repair generate)
     assert mock_client.generate.call_count == 2
 
-def test_analysis_partial_failures(existing_advisor) -> None:
+def test_analysis_partial_failures() -> None:
     """
     Verifies that a single analyzer failure (e.g. Compliance fails) is tolerated,
     and overall score is computed from the successful analyzers (Discovery + Sales Quality).
     """
-    assert existing_advisor is not None
     os.makedirs("./storage/test_analysis", exist_ok=True)
     audio_path = "./storage/test_analysis/partial_analysis.wav"
     generate_wav(audio_path, duration=4.0)
@@ -207,7 +199,6 @@ def test_analysis_partial_failures(existing_advisor) -> None:
             with open(audio_path, "rb") as f:
                 response = client.post(
                     "/calls/upload",
-                    data={"advisor_id": existing_advisor.id},
                     files={"audio_file": ("partial_analysis.wav", f, "audio/wav")}
                 )
                 
@@ -235,11 +226,10 @@ def test_analysis_partial_failures(existing_advisor) -> None:
     if os.path.exists(audio_path):
         os.remove(audio_path)
 
-def test_analysis_complete_failure(existing_advisor) -> None:
+def test_analysis_complete_failure() -> None:
     """
     Verifies that if ALL analyzers fail, the pipeline fails gracefully and call status becomes Failed.
     """
-    assert existing_advisor is not None
     os.makedirs("./storage/test_analysis", exist_ok=True)
     audio_path = "./storage/test_analysis/complete_fail_analysis.wav"
     generate_wav(audio_path, duration=4.0)
@@ -264,12 +254,11 @@ def test_analysis_complete_failure(existing_advisor) -> None:
     with patch("backend.app.ai.analyzers.discovery_analyzer.DiscoveryAnalyzer.analyze", side_effect=RuntimeError("Discovery down")), \
          patch("backend.app.ai.analyzers.compliance_analyzer.ComplianceAnalyzer.analyze", side_effect=RuntimeError("Compliance down")), \
          patch("backend.app.ai.analyzers.sales_quality_analyzer.SalesQualityAnalyzer.analyze", side_effect=RuntimeError("Sales quality down")):
-             
+              
         with patch("backend.app.pipeline.call_processor.CallProcessor._transcribe", mock_transcribe_func):
             with open(audio_path, "rb") as f:
                 response = client.post(
                     "/calls/upload",
-                    data={"advisor_id": existing_advisor.id},
                     files={"audio_file": ("complete_fail_analysis.wav", f, "audio/wav")}
                 )
                 

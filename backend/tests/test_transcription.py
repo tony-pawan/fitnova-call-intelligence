@@ -7,7 +7,6 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient  # pyrefly: ignore [missing-import]
 from backend.app.main import app
 from backend.app.database.session import SessionLocal
-from backend.app.models.advisor import Advisor
 from backend.app.models.call import Call, CallStatus
 from backend.app.models.transcript import TranscriptSegment
 from backend.app.utils.json_storage import load_json
@@ -64,10 +63,6 @@ def db_session():
         db.close()
 
 @pytest.fixture(scope="module")
-def existing_advisor(db_session):
-    return db_session.query(Advisor).first()
-
-@pytest.fixture(scope="module")
 def test_files():
     temp_dir = "./storage/test_transcribe_temp"
     os.makedirs(temp_dir, exist_ok=True)
@@ -104,17 +99,14 @@ def test_files():
         except Exception:
             pass
 
-def test_transcribe_success(existing_advisor, test_files) -> None:
+def test_transcribe_success(test_files) -> None:
     """
     Checks end-to-end transcription flow, ensuring PostgreSQL segments
     and JSON artifacts are stored under storage/transcripts/.
     """
-    assert existing_advisor is not None
-    
     with open(test_files["success"], "rb") as f:
         response = client.post(
             "/calls/upload",
-            data={"advisor_id": existing_advisor.id},
             files={"audio_file": ("success.wav", f, "audio/wav")}
         )
         
@@ -136,6 +128,7 @@ def test_transcribe_success(existing_advisor, test_files) -> None:
             json_path = f"./storage/transcripts/call_{call_id}.json"
             assert os.path.exists(json_path)
             
+            # Use safe parser
             json_data = load_json(json_path)
             assert json_data["version"] == "1.0"
             assert "generated_at" in json_data
@@ -144,14 +137,13 @@ def test_transcribe_success(existing_advisor, test_files) -> None:
         finally:
             db.close()
 
-def test_transcribe_silent(existing_advisor, test_files) -> None:
+def test_transcribe_silent(test_files) -> None:
     """
     Verifies that silent audio uploads are parsed without error.
     """
     with open(test_files["silent"], "rb") as f:
         response = client.post(
             "/calls/upload",
-            data={"advisor_id": existing_advisor.id},
             files={"audio_file": ("silent.wav", f, "audio/wav")}
         )
         
@@ -165,14 +157,13 @@ def test_transcribe_silent(existing_advisor, test_files) -> None:
         finally:
             db.close()
 
-def test_transcribe_short_audio(existing_advisor, test_files) -> None:
+def test_transcribe_short_audio(test_files) -> None:
     """
     Verifies that very short audio files (0.2s) are processed safely.
     """
     with open(test_files["short"], "rb") as f:
         response = client.post(
             "/calls/upload",
-            data={"advisor_id": existing_advisor.id},
             files={"audio_file": ("short.wav", f, "audio/wav")}
         )
         
@@ -186,14 +177,13 @@ def test_transcribe_short_audio(existing_advisor, test_files) -> None:
         finally:
             db.close()
 
-def test_transcribe_long_audio(existing_advisor, test_files) -> None:
+def test_transcribe_long_audio(test_files) -> None:
     """
     Verifies that longer audio files are processed safely.
     """
     with open(test_files["long"], "rb") as f:
         response = client.post(
             "/calls/upload",
-            data={"advisor_id": existing_advisor.id},
             files={"audio_file": ("long.wav", f, "audio/wav")}
         )
         
@@ -207,14 +197,13 @@ def test_transcribe_long_audio(existing_advisor, test_files) -> None:
         finally:
             db.close()
 
-def test_transcribe_corrupted_audio(existing_advisor, test_files) -> None:
+def test_transcribe_corrupted_audio(test_files) -> None:
     """
     Verifies that corrupted files trigger pipeline failure and set status to Failed.
     """
     with open(test_files["corrupted"], "rb") as f:
         response = client.post(
             "/calls/upload",
-            data={"advisor_id": existing_advisor.id},
             files={"audio_file": ("corrupted.wav", f, "audio/wav")}
         )
         

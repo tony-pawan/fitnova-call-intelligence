@@ -15,7 +15,6 @@ upload_service = UploadService()
 
 @router.post("/upload")
 def upload_call(
-    advisor_id: int = Form(...),
     audio_file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
@@ -29,7 +28,6 @@ def upload_call(
         
     db_call = upload_service.upload_call(
         db=db, 
-        advisor_id=advisor_id, 
         audio_file=audio_file,
         background_tasks=background_tasks
     )
