@@ -114,44 +114,25 @@ class GeminiClient:
                 })
 
         # Real API Invocations
-        import time
-        max_retries = 3
-        backoff = 12.0
+        try:
+            logger.info("[ANALYSIS] Gemini request started")
+            model = genai.GenerativeModel(settings.GEMINI_MODEL)
+            
+            config = {
+                "temperature": settings.TEMPERATURE,
+                "max_output_tokens": settings.MAX_OUTPUT_TOKENS,
+            }
+            if schema_json_desc:
+                config["response_mime_type"] = "application/json"
 
-        for attempt in range(max_retries + 1):
-            try:
-                logger.info(f"[ANALYSIS] Gemini request started (attempt {attempt + 1}/{max_retries + 1})")
-                model = genai.GenerativeModel(settings.GEMINI_MODEL)
-                
-                config = {
-                    "temperature": settings.TEMPERATURE,
-                    "max_output_tokens": settings.MAX_OUTPUT_TOKENS,
-                }
-                if schema_json_desc:
-                    config["response_mime_type"] = "application/json"
-
-                response = model.generate_content(
-                    prompt,
-                    generation_config=config,
-                    request_options={"timeout": 30.0}
-                )
-                return response.text
-            except Exception as e:
-                err_msg = str(e)
-                is_rate_limit = "429" in err_msg or "quota" in err_msg or "ResourceExhausted" in err_msg or "rate limit" in err_msg
-                is_daily_limit = "PerDay" in err_msg or "daily" in err_msg
-                
-                if is_rate_limit and not is_daily_limit and attempt < max_retries:
-                    logger.warning(f"Gemini API rate limit exceeded (minute level). Retrying in {backoff} seconds... (Attempt {attempt + 1}/{max_retries})")
-                    time.sleep(backoff)
-                    backoff *= 2
-                    continue
-                
-                if is_daily_limit:
-                    logger.error("Daily Gemini API request quota fully exhausted. Failing fast without retries.")
-                else:
-                    logger.error(f"Gemini API request failed: {e}. Falling back to deterministic mock response.")
-                break
+            response = model.generate_content(
+                prompt,
+                generation_config=config,
+                request_options={"timeout": 30.0}
+            )
+            return response.text
+        except Exception as e:
+            logger.error(f"Gemini API request failed: {e}. Falling back to deterministic mock response.")
 
         # Fallback responses after retries exhaust or other exceptions hit
         prompt_lower = prompt.lower()
