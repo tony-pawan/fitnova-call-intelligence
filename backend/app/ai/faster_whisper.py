@@ -113,7 +113,8 @@ class FasterWhisperTranscriber(Transcriber):
                                 response_mime_type="application/json",
                                 response_schema=TranscriptSchema,
                                 temperature=0.1
-                            )
+                            ),
+                            request_options={"timeout": 45.0}
                         )
                         response_text = response.text
                         break

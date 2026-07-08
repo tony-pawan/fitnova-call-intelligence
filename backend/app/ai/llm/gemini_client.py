@@ -132,7 +132,8 @@ class GeminiClient:
 
                 response = model.generate_content(
                     prompt,
-                    generation_config=config
+                    generation_config=config,
+                    request_options={"timeout": 30.0}
                 )
                 return response.text
             except Exception as e:
