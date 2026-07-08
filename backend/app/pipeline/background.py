@@ -17,6 +17,7 @@ def trigger_call_processing(call_id: int, background_tasks: BackgroundTasks) -> 
         call = db.query(CallModel).filter(CallModel.id == call_id).first()
         if call:
             call.status = CallStatus.Queued
+            call.progress = 5
             db.commit()
             db.refresh(call)
             

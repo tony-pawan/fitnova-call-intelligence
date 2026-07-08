@@ -33,6 +33,11 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 def on_startup() -> None:
+    from backend.app.database.init_db import init_db
+    try:
+        init_db()
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
     logger.info("FitNova API started successfully. Access Swagger documentation at http://localhost:8000/docs")
 
 @app.on_event("shutdown")

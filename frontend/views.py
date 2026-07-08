@@ -6,151 +6,312 @@ import plotly.express as px  # pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session  # pyrefly: ignore [missing-import]
 
 from backend.app.services.dashboard_service import DashboardService
-from backend.app.models.call import CallStatus
+from backend.app.models.call import Call, CallStatus
+from backend.app.models.analysis import CallAnalysis
+from backend.app.utils.json_storage import load_json
 
 # Backend URL for upload actions
 BACKEND_URL = "http://127.0.0.1:8000"
 
 def render_home_view(db: Session):
     """
-    Renders the minimal, modern Home landing page view with the processing pipeline
-    flow diagram, the file upload action, and current background status.
+    Renders the modern, dynamic Source-Agnostic Ingestion Hub.
+    Handles uploads, WATCH directories, CRM CSV datasets, APIs, and simulated telephony/dialers.
     """
-    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">⚡ Standalone Call Intelligence</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">⚡ Standalone Call Ingestion Hub</h2>', unsafe_allow_html=True)
     st.markdown(
-        "Upload audio recordings of your sales conversations to automatically transcribe, "
-        "differentiate advisor/customer speakers, and perform a multi-agent AI compliance audit."
+        "Ingest call recordings from multiple enterprise sources. Every connector normalizes "
+        "incoming audio streams to trigger the background automated AI pipeline."
     )
     st.markdown("---")
 
-    # 1. Pipeline Visualization Flowcard
-    st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>AI Processing Pipeline</h4>", unsafe_allow_html=True)
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.markdown(
-            "<div style='background-color:#f1f5f9;border:1px solid #cbd5e1;padding:12px;border-radius:6px;text-align:center;'>"
-            "<strong>1. Upload</strong><br><small style='color:#64748b;'>Audio File Ingest</small>"
-            "</div>", unsafe_allow_html=True
-        )
-    with col2:
-        st.markdown(
-            "<div style='background-color:#f1f5f9;border:1px solid #cbd5e1;padding:12px;border-radius:6px;text-align:center;'>"
-            "<strong>2. Transcribe</strong><br><small style='color:#64748b;'>Whisper Model</small>"
-            "</div>", unsafe_allow_html=True
-        )
-    with col3:
-        st.markdown(
-            "<div style='background-color:#f1f5f9;border:1px solid #cbd5e1;padding:12px;border-radius:6px;text-align:center;'>"
-            "<strong>3. Diarize</strong><br><small style='color:#64748b;'>Pyannote separating</small>"
-            "</div>", unsafe_allow_html=True
-        )
-    with col4:
-        st.markdown(
-            "<div style='background-color:#f1f5f9;border:1px solid #cbd5e1;padding:12px;border-radius:6px;text-align:center;'>"
-            "<strong>4. Analyze</strong><br><small style='color:#64748b;'>Gemini Audit</small>"
-            "</div>", unsafe_allow_html=True
-        )
-    with col5:
-        st.markdown(
-            "<div style='background-color:#ecfdf5;border:1px solid #a7f3d0;padding:12px;border-radius:6px;text-align:center;'>"
-            "<strong style='color:#065f46;'>5. Visualize</strong><br><small style='color:#047857;'>Scorecard & History</small>"
-            "</div>", unsafe_allow_html=True
-        )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 2. Prominent Upload Action Button and Form
-    if "show_upload" not in st.session_state:
-        st.session_state["show_upload"] = False
-
-    if not st.session_state["show_upload"]:
-        if st.button("📤 Upload New Call", type="primary", use_container_width=True):
-            st.session_state["show_upload"] = True
-            st.rerun()
-    else:
-        st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Upload Call Recording</h4>", unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Choose an audio file (.wav, .mp3, .m4a)", type=["wav", "mp3", "m4a"])
-        
-        btn_col1, btn_col2 = st.columns([1, 4])
-        with btn_col1:
-            if st.button("Cancel", use_container_width=True):
-                st.session_state["show_upload"] = False
-                st.rerun()
-        with btn_col2:
-            if st.button("Process Recording", type="primary", use_container_width=True, disabled=(not uploaded_file)):
-                with st.spinner("Uploading and initializing background processing..."):
-                    try:
-                        files = {"audio_file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                        response = requests.post(f"{BACKEND_URL}/calls/upload", files=files, timeout=60)
-                        
-                        if response.status_code == 200:
-                            st.success("Successfully uploaded! Call processing triggered in background.")
-                            st.session_state["show_upload"] = False
-                            st.rerun()
-                        else:
-                            st.error(f"Upload failed: {response.json().get('detail', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"Error connecting to backend: {e}")
-
-    st.markdown("---")
-
-    # 3. System Health and Processing Statuses
-    st.markdown("<h4 style='color:#1e293b;font-weight:600;'>System Status & Recent Pipeline Activity</h4>", unsafe_allow_html=True)
-    
-    history = DashboardService.get_history(db)
-    active_runs = [c for c in history if c["status"] in [CallStatus.Uploaded.value, CallStatus.Queued.value, CallStatus.Processing.value]]
-
-    if active_runs:
-        st.info(f"🔄 Currently processing {len(active_runs)} call recording(s) in the pipeline.")
-        for run in active_runs:
-            status_color = "#3b82f6" if run["status"] == "Processing" else "#f59e0b"
+    # Check if last ingested call is completed
+    if "last_ingested_call_id" in st.session_state:
+        last_id = st.session_state["last_ingested_call_id"]
+        call_record = db.query(Call).filter(Call.id == last_id).first()
+        if call_record and call_record.status == CallStatus.Completed:
             st.markdown(
-                f"<div style='border-left: 4px solid {status_color}; background-color:#f8fafc; padding:8px 16px; border-radius:4px; margin-bottom:8px;'>"
-                f"<strong>{run['filename']}</strong> — State: <span style='color:{status_color};font-weight:600;'>{run['status']}</span>"
+                f"<div style='background-color:#ecfdf5; border:1px solid #10b981; padding:16px; border-radius:8px; margin-bottom:20px;'>"
+                f"🎉 <strong>Ingestion & AI Analysis Completed!</strong> Call record #{call_record.id} (<code>{call_record.original_filename}</code>) is ready for review."
                 f"</div>", unsafe_allow_html=True
             )
-    else:
-        st.success("🟢 Pipeline idle. All uploaded recordings have been successfully completed.")
+            col_b, col_sp = st.columns([1.5, 3])
+            with col_b:
+                if st.button("👁️ View Call Analysis scorecard", type="primary", use_container_width=True):
+                    st.session_state["selected_call_id"] = call_record.id
+                    st.session_state["current_page"] = "History"
+                    del st.session_state["last_ingested_call_id"]
+                    st.rerun()
+
+    # Dynamic pipeline tracking queue for currently processing calls
+    active_calls = db.query(Call).filter(Call.status.in_([CallStatus.Uploaded, CallStatus.Queued, CallStatus.Processing])).all()
+
+    if active_calls:
+        st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>🔄 Processing Queue Timeline</h4>", unsafe_allow_html=True)
+        for call_record in active_calls:
+            st.markdown(f"<div style='background-color:#faf5ff;border:1px solid #e9d5ff;padding:16px;border-radius:8px;margin-bottom:15px;'>", unsafe_allow_html=True)
+            col_lbl, col_pct = st.columns([3, 1])
+            with col_lbl:
+                st.markdown(f"📁 **File:** `{call_record.original_filename}` | Source: `{call_record.source}` | Vendor: `{call_record.vendor}`")
+                st.markdown(f"⚙️ **Status:** `{call_record.status.value}`")
+            with col_pct:
+                st.markdown(f"<div style='text-align:right;font-size:1.5rem;font-weight:800;color:#7c3aed;'>{call_record.progress}%</div>", unsafe_allow_html=True)
+            st.progress(call_record.progress / 100.0)
+            
+            # Stages visualization timeline
+            stages = ["Normalizing", "Transcribing", "Diarizing", "Redacting PII", "Analyzing"]
+            current_stage_idx = 0
+            if call_record.progress >= 90:
+                current_stage_idx = 4
+            elif call_record.progress >= 70:
+                current_stage_idx = 3
+            elif call_record.progress >= 50:
+                current_stage_idx = 2
+            elif call_record.progress >= 30:
+                current_stage_idx = 1
+            
+            stage_html = ""
+            for idx, stage in enumerate(stages):
+                color = "#4f46e5" if idx == current_stage_idx else ("#10b981" if idx < current_stage_idx else "#64748b")
+                bullet = "🔵" if idx == current_stage_idx else ("🟢" if idx < current_stage_idx else "⚪")
+                stage_html += f"<span style='color:{color};font-weight:{'700' if idx==current_stage_idx else 'normal'};margin-right:15px;'>{bullet} {stage}</span>"
+            st.markdown(f"<div style='margin-top:10px;'>{stage_html}</div>", unsafe_allow_html=True)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+        import time
+        time.sleep(1.5)
+        st.rerun()
+
+    # Ingestion Source Tile Selector
+    st.markdown("<h4 style='color:#1e293b;font-weight:600;'>Choose Audio Source</h4>", unsafe_allow_html=True)
+    
+    if "active_source" not in st.session_state:
+        st.session_state["active_source"] = "upload"
+
+    col_s1, col_s2, col_s3, col_s4, col_s5, col_s6 = st.columns(6)
+    with col_s1:
+        if st.button("📤 Upload\nFile", use_container_width=True, type="primary" if st.session_state["active_source"] == "upload" else "secondary"):
+            st.session_state["active_source"] = "upload"
+            st.rerun()
+    with col_s2:
+        if st.button("📁 Folder\nImport", use_container_width=True, type="primary" if st.session_state["active_source"] == "folder" else "secondary"):
+            st.session_state["active_source"] = "folder"
+            st.rerun()
+    with col_s3:
+        if st.button("📊 CRM\nExport", use_container_width=True, type="primary" if st.session_state["active_source"] == "crm" else "secondary"):
+            st.session_state["active_source"] = "crm"
+            st.rerun()
+    with col_s4:
+        if st.button("🔌 REST\nAPI", use_container_width=True, type="primary" if st.session_state["active_source"] == "api" else "secondary"):
+            st.session_state["active_source"] = "api"
+            st.rerun()
+    with col_s5:
+        if st.button("📞 Telephony\nPlatform", use_container_width=True, type="primary" if st.session_state["active_source"] == "telephony" else "secondary"):
+            st.session_state["active_source"] = "telephony"
+            st.rerun()
+    with col_s6:
+        if st.button("🤖 Dialer\nPlatform", use_container_width=True, type="primary" if st.session_state["active_source"] == "dialer" else "secondary"):
+            st.session_state["active_source"] = "dialer"
+            st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    active_src = st.session_state["active_source"]
+
+    # 1. Manual Upload View
+    if active_src == "upload":
+        st.markdown("<h5 style='color:#4f46e5;'>Direct Manual Call Upload</h5>", unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("Choose a WAV, MP3, or M4A call recording file", type=["wav", "mp3", "m4a", "aac"])
+        if st.button("Process Uploaded Call", type="primary", use_container_width=True, disabled=not uploaded_file):
+            with st.spinner("Processing manually uploaded call..."):
+                try:
+                    files = {"api_audio_file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    data = {"source_type": "Upload"}
+                    response = requests.post(f"{BACKEND_URL}/calls/ingest", files=files, data=data, timeout=60)
+                    if response.status_code == 200:
+                        res = response.json()
+                        st.success("Successfully ingested uploaded call!")
+                        if res.get("ingested_calls"):
+                            st.session_state["last_ingested_call_id"] = res["ingested_calls"][0]["id"]
+                        st.rerun()
+                    else:
+                        st.error(f"Ingestion failed: {response.json().get('detail', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # 2. Folder watch scanner View
+    elif active_src == "folder":
+        st.markdown("<h5 style='color:#4f46e5;'>Local Directory Watcher Connector</h5>", unsafe_allow_html=True)
+        st.info("Watch a local directory path to scan, filter, and ingest new sales call recordings automatically.")
+        folder_path = st.text_input("Enter watch absolute directory path (e.g. C:/Users/Admin/Desktop/novafit/sample_calls)", "C:/Users/Admin/Desktop/novafit")
+        if st.button("Scan and Ingest Folder Files", type="primary", use_container_width=True):
+            with st.spinner("Scanning directory watch path..."):
+                try:
+                    data = {"source_type": "Folder", "folder_path": folder_path}
+                    response = requests.post(f"{BACKEND_URL}/calls/ingest", data=data, timeout=60)
+                    if response.status_code == 200:
+                        res = response.json()
+                        st.success(f"Successfully scanned folder! Ingested {res.get('count', 0)} new call(s).")
+                        if res.get("ingested_calls"):
+                            st.session_state["last_ingested_call_id"] = res["ingested_calls"][0]["id"]
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to scan: {response.json().get('detail', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # 3. CRM Spreadsheet Parser View
+    elif active_src == "crm":
+        st.markdown("<h5 style='color:#4f46e5;'>CRM Dataset Spreadsheet Connector</h5>", unsafe_allow_html=True)
+        st.info("Load dataset records from exported CRM sheets (CSV format) and map them to audio files inside a directory folder.")
+        crm_csv_file = st.file_uploader("Upload CRM dataset metadata export file (.csv)", type=["csv"])
+        audio_dir = st.text_input("Enter local folder path containing the call recordings", "C:/Users/Admin/Desktop/novafit")
+        
+        if crm_csv_file:
+            try:
+                import io
+                df = pd.read_csv(io.StringIO(crm_csv_file.getvalue().decode('utf-8-sig')))
+                st.markdown("###### Previewing CRM sheet metadata rows:")
+                st.dataframe(df.head(5), use_container_width=True)
+            except Exception as pe:
+                st.error(f"Failed to parse preview: {pe}")
+
+        if st.button("Parse and Ingest CRM Dataset", type="primary", use_container_width=True, disabled=not crm_csv_file):
+            with st.spinner("Validating files and mapping metadata..."):
+                try:
+                    files = {"crm_metadata_file": (crm_csv_file.name, crm_csv_file.getvalue(), "text/csv")}
+                    data = {"source_type": "CRM", "crm_audio_dir": audio_dir}
+                    response = requests.post(f"{BACKEND_URL}/calls/ingest", files=files, data=data, timeout=60)
+                    if response.status_code == 200:
+                        res = response.json()
+                        st.success(f"CRM Ingestion complete! Imported {res.get('count', 0)} calls.")
+                        if res.get("ingested_calls"):
+                            st.session_state["last_ingested_call_id"] = res["ingested_calls"][0]["id"]
+                        st.rerun()
+                    else:
+                        st.error(f"Failed: {response.json().get('detail', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # 4. Developer REST API View
+    elif active_src == "api":
+        st.markdown("<h5 style='color:#4f46e5;'>External REST API Ingestion</h5>", unsafe_allow_html=True)
+        st.markdown(
+            "Integrate external webhooks or programmatic ingestion services. Exposes an authenticated "
+            f"endpoint at `POST {BACKEND_URL}/calls/ingest` supporting multipart Form/File uploads."
+        )
+        st.markdown("###### JSON Payload details:")
+        st.json({
+            "source_type": "API (Required, Form string)",
+            "external_call_id": "Unique vendor identifier (Required, Form string)",
+            "api_audio_file": "Multipart file binaries (Required, Audio file stream)",
+            "api_metadata_json": "Serialized metadata attributes (Optional, JSON Form string: advisor_name, customer_name, call_time)"
+        })
+        st.markdown("###### Example cURL command:")
+        st.code(
+            f'curl -X POST "{BACKEND_URL}/calls/ingest" \\\n'
+            '  -F "source_type=API" \\\n'
+            '  -F "external_call_id=DL987654" \\\n'
+            '  -F "api_audio_file=@call_recording.mp3" \\\n'
+            '  -F "api_metadata_json={\\"customer_name\\":\\"Neha\\",\\"advisor_name\\":\\"Arjun\\",\\"vendor\\":\\"Salesforce Integration\\"}"',
+            language="bash"
+        )
+
+    # 5. Telephony simulation View
+    elif active_src == "telephony":
+        st.markdown("<h5 style='color:#4f46e5;'>Telephony Platform Connector Simulator</h5>", unsafe_allow_html=True)
+        st.info("Trigger a simulated incoming webhook callback event from major telephony vendors. "
+                "The connector fetches call SID identifiers and redirects audio to the processing pipeline.")
+        vendor_choice = st.selectbox("Select Telephony Vendor Platform Adapter:", ["Twilio", "Aircall", "RingCentral", "Genesys", "CloudTalk", "Dialpad"])
+        
+        st.markdown(f"Status: 🟢 **Simulator Sandbox Enabled ({vendor_choice})**")
+        st.markdown(
+            "<div style='border-left:4px solid #3b82f6; background-color:#eff6ff; padding:12px; border-radius:4px; margin-bottom:15px;'>"
+            "<strong>Twilio Webhook Flow:</strong> Event trigger ➔ Fetch call SID recording stream ➔ Normalize AudioInput ➔ Trigger Pipeline"
+            "</div>", unsafe_allow_html=True
+        )
+
+        if st.button(f"Trigger Simulated {vendor_choice} Event", type="primary", use_container_width=True):
+            with st.spinner("Simulating incoming callback..."):
+                try:
+                    data = {"source_type": "Telephony", "vendor": vendor_choice}
+                    response = requests.post(f"{BACKEND_URL}/calls/ingest", data=data, timeout=60)
+                    if response.status_code == 200:
+                        res = response.json()
+                        st.success(f"Simulated telephony event ingested call: ID {res.get('ingested_calls', [{}])[0].get('id')}!")
+                        if res.get("ingested_calls"):
+                            st.session_state["last_ingested_call_id"] = res["ingested_calls"][0]["id"]
+                        st.rerun()
+                    else:
+                        st.error(f"Simulation failed: {response.json().get('detail', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # 6. Dialer simulation View
+    elif active_src == "dialer":
+        st.markdown("<h5 style='color:#4f46e5;'>Outbound Dialer Platform Connector Simulator</h5>", unsafe_allow_html=True)
+        st.info("Trigger simulated outbound call events completed inside call center dialers.")
+        vendor_choice = st.selectbox("Select Outbound Dialer Vendor Platform Adapter:", ["Five9", "Salesforce Dialer", "Vicidial"])
+        
+        st.markdown(f"Status: 🟢 **Simulator Sandbox Enabled ({vendor_choice})**")
+        st.markdown(
+            "<div style='border-left:4px solid #f59e0b; background-color:#fffbeb; padding:12px; border-radius:4px; margin-bottom:15px;'>"
+            "<strong>Five9 Agent Event Flow:</strong> Call completion disposition ➔ Fetch CRM lead details ➔ Normalize AudioInput DTO ➔ Trigger Pipeline"
+            "</div>", unsafe_allow_html=True
+        )
+
+        if st.button(f"Trigger Simulated {vendor_choice} Event", type="primary", use_container_width=True):
+            with st.spinner("Simulating dialer completed event..."):
+                try:
+                    data = {"source_type": "Dialer", "vendor": vendor_choice}
+                    response = requests.post(f"{BACKEND_URL}/calls/ingest", data=data, timeout=60)
+                    if response.status_code == 200:
+                        res = response.json()
+                        st.success(f"Simulated dialer event ingested call: ID {res.get('ingested_calls', [{}])[0].get('id')}!")
+                        if res.get("ingested_calls"):
+                            st.session_state["last_ingested_call_id"] = res["ingested_calls"][0]["id"]
+                        st.rerun()
+                    else:
+                        st.error(f"Simulation failed: {response.json().get('detail', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 
 def render_dashboard_view(db: Session):
     """
-    Renders the dedicated analytics page with metrics and visual charts.
+    Renders the redesigned, assignment-focused operational dashboard.
     """
     metrics = DashboardService.get_dashboard_metrics(db)
 
     if metrics["total_calls"] == 0:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.info("💡 **No calls have been analyzed yet.** Go to the Home view and upload your first recording to populate analytics.")
+        st.info("💡 **No calls have been analyzed yet.** Go to the Home view and ingest your first recording to populate analytics.")
         return
 
-    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">📈 Platform Dashboard</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">📈 Conversational Intelligence Dashboard</h2>', unsafe_allow_html=True)
     st.markdown("---")
 
-    # Top KPI Metrics Cards
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        st.metric(label="Total Processed Recordings", value=metrics["total_calls"])
-    with kpi2:
-        st.metric(label="Successfully Completed", value=metrics["completed_calls"])
-    with kpi3:
-        st.metric(label="Average Quality Score", value=f"{metrics['average_score']}/100")
-    with kpi4:
-        min_sec = f"{int(metrics['average_duration'] // 60)}m {int(metrics['average_duration'] % 60)}s"
-        st.metric(label="Average Call Duration", value=min_sec)
+    # Section 1: Pipeline Overview
+    st.markdown("#### ⚙️ 1. Pipeline Overview")
+    
+    # KPI metrics cards
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+    with kpi_col1:
+        st.metric(label="Total Calls Processed", value=metrics["total_calls"])
+    with kpi_col2:
+        st.metric(label="Average AI Quality Score", value=f"{metrics['average_score']}/100")
+    with kpi_col3:
+        st.metric(label="Average Processing Time", value=f"{metrics['average_processing_time']}s")
+    with kpi_col4:
+        st.metric(label="Calls Requiring Review", value=metrics["calls_requiring_review"])
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # Plotly Charts
-    trends = DashboardService.get_score_trends(db)
-    issues_data = DashboardService.get_issue_distribution(db)
-    proc_stats = DashboardService.get_processing_statistics(db)
-
-    chart_col1, chart_col2 = st.columns(2)
-
-    with chart_col1:
-        st.markdown("<h5 style='font-weight:600;'>Average Quality Score Over Time</h5>", unsafe_allow_html=True)
+    # Row 1: Quality Trend & Stage durations
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.markdown("<h5 style='font-weight:600;'>AI Quality Score Trend</h5>", unsafe_allow_html=True)
+        trends = DashboardService.get_score_trends(db)
         if trends:
             df_trends = pd.DataFrame(trends)
             fig_trend = px.line(
@@ -160,48 +321,114 @@ def render_dashboard_view(db: Session):
                 hover_data=["filename"],
                 labels={"date": "Upload Date", "score": "AI Score"},
                 markers=True,
-                color_discrete_sequence=["#6366f1"]
+                color_discrete_sequence=["#4f46e5"]
             )
             fig_trend.update_layout(yaxis_range=[0, 100], margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig_trend, use_container_width=True)
         else:
             st.info("Not enough data to calculate timeline trends.")
+            
+    with col_t2:
+        st.markdown("<h5 style='font-weight:600;'>Pipeline Stage Average Performance (s)</h5>", unsafe_allow_html=True)
+        durations = metrics.get("stage_durations", {})
+        if durations:
+            df_dur = pd.DataFrame([{"Stage": k, "Duration (s)": v} for k, v in durations.items()])
+            fig_dur = px.bar(
+                df_dur,
+                x="Duration (s)",
+                y="Stage",
+                orientation="h",
+                color="Stage",
+                color_discrete_sequence=px.colors.qualitative.Bold
+            )
+            fig_dur.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+            st.plotly_chart(fig_dur, use_container_width=True)
+        else:
+            st.info("No pipeline telemetry data available.")
 
-    with chart_col2:
-        st.markdown("<h5 style='font-weight:600;'>Pipeline Executions Status</h5>", unsafe_allow_html=True)
-        df_stats = pd.DataFrame([{"Status": k, "Count": v} for k, v in proc_stats.items()])
-        fig_stats = px.bar(
-            df_stats, 
-            x="Status", 
-            y="Count", 
-            color="Status",
-            labels={"Status": "Pipeline State", "Count": "Quantity"},
-            color_discrete_sequence=px.colors.qualitative.Pastel
+    # Row 2: Ingestion Sources & Health Table
+    col_i1, col_i2 = st.columns(2)
+    with col_i1:
+        st.markdown("<h5 style='font-weight:600;'>Calls by Ingestion Source</h5>", unsafe_allow_html=True)
+        src_data = metrics["calls_by_source"]
+        clean_src = {}
+        for k, v in src_data.items():
+            key = k
+            if k == "Folder": key = "Folder Watcher"
+            elif k == "CRM": key = "CRM Import"
+            elif k in ["Telephony", "Dialer"]: key = "Telephony/Dialer"
+            clean_src[key] = clean_src.get(key, 0) + v
+            
+        df_src = pd.DataFrame([{"Source": k, "Volume": v} for k, v in clean_src.items()])
+        fig_src = px.pie(df_src, names="Source", values="Volume", hole=0.3, color_discrete_sequence=px.colors.qualitative.Safe)
+        fig_src.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(fig_src, use_container_width=True)
+        
+    with col_i2:
+        st.markdown("<h5 style='font-weight:600;'>Connector Operational Status</h5>", unsafe_allow_html=True)
+        health_data = metrics["source_health"]
+        health_rows = []
+        for k, v in health_data.items():
+            status_symbol = "🟢 Active" if v == "Active" else ("🔴 Error" if v == "Error" else "⚪ Inactive")
+            health_rows.append({"Ingestion Connector Source": k, "Operational Status": status_symbol})
+        st.dataframe(pd.DataFrame(health_rows), use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # Section 2: Sales Performance
+    st.markdown("#### 🏆 2. Sales Performance")
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1:
+        st.markdown("<h5 style='font-weight:600;'>Score Breakdown by Category</h5>", unsafe_allow_html=True)
+        cat_data = metrics.get("category_scores", {})
+        if cat_data:
+            df_cat = pd.DataFrame([{"Evaluation Category": k, "Average Score": v} for k, v in cat_data.items()])
+            fig_cat = px.bar(
+                df_cat,
+                x="Average Score",
+                y="Evaluation Category",
+                orientation="h",
+                color="Evaluation Category",
+                color_discrete_sequence=["#10b981"]
+            )
+            fig_cat.update_layout(xaxis_range=[0, 100], margin=dict(l=20, r=20, t=20, b=20))
+            st.plotly_chart(fig_cat, use_container_width=True)
+        else:
+            st.info("No category scores aggregated yet.")
+    with col_s2:
+        st.markdown(
+            "<div style='background-color:#fafafa; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-top:35px;'>"
+            "<strong>💡 Sales Coaching Tip:</strong><br><small style='color:#475569;'>"
+            "Objection Handling and Needs Discovery segments represent primary quality bottlenecks. "
+            "Focus on training agents to identify budget triggers and ask open-ended questions.</small>"
+            "</div>", unsafe_allow_html=True
         )
-        fig_stats.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-        st.plotly_chart(fig_stats, use_container_width=True)
 
-    chart_col3, chart_col4 = st.columns(2)
+    st.markdown("---")
 
-    with chart_col3:
-        st.markdown("<h5 style='font-weight:600;'>Most Common Audit Violations</h5>", unsafe_allow_html=True)
+    # Section 3: Compliance & Risk
+    st.markdown("#### ⚠️ 3. Compliance & Risk")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        st.markdown("<h5 style='font-weight:600;'>Compliance & Violations Categories</h5>", unsafe_allow_html=True)
+        issues_data = DashboardService.get_issue_distribution(db)
         if issues_data["top_issues"]:
             df_issues = pd.DataFrame(issues_data["top_issues"])
             fig_issues = px.bar(
-                df_issues, 
-                x="count", 
-                y="tag", 
+                df_issues,
+                x="count",
+                y="tag",
                 orientation="h",
-                labels={"count": "Frequency", "tag": "Violation Tag"},
-                color_discrete_sequence=["#ec4899"]
+                labels={"count": "Occurrences", "tag": "Issue Category"},
+                color_discrete_sequence=["#ef4444"]
             )
             fig_issues.update_layout(margin=dict(l=20, r=20, t=20, b=20), yaxis=dict(autorange="reversed"))
             st.plotly_chart(fig_issues, use_container_width=True)
         else:
-            st.success("No compliance violations flagged yet!")
-
-    with chart_col4:
-        st.markdown("<h5 style='font-weight:600;'>Flagged Severity Breakdown</h5>", unsafe_allow_html=True)
+            st.success("No compliance issue violations flagged yet!")
+            
+    with col_c2:
+        st.markdown("<h5 style='font-weight:600;'>Audit Issues Severity Distribution</h5>", unsafe_allow_html=True)
         sev_counts = issues_data["severity_breakdown"]
         if sum(sev_counts.values()) > 0:
             df_sev = pd.DataFrame([{"Severity": k, "Count": v} for k, v in sev_counts.items() if v > 0])
@@ -218,6 +445,56 @@ def render_dashboard_view(db: Session):
         else:
             st.info("No compliance issues to classify.")
 
+    st.markdown("---")
+
+    # Section 4: Recent Activity Table
+    st.markdown("#### 📋 4. Recent Activity")
+    history = DashboardService.get_history(db)
+    if history:
+        # Get top 5 recent processed calls
+        recent = history[:5]
+        
+        # Display as columns table layout
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_h1, col_h2, col_h3, col_h4, col_h5, col_h6, col_h7 = st.columns([1, 2.5, 1.2, 1.2, 1.2, 1.2, 1.2])
+        with col_h1: st.markdown("**Call ID**")
+        with col_h2: st.markdown("**Filename**")
+        with col_h3: st.markdown("**Upload Time**")
+        with col_h4: st.markdown("**Duration**")
+        with col_h5: st.markdown("**Overall Score**")
+        with col_h6: st.markdown("**Status**")
+        with col_h7: st.markdown("**Issues Flagged**")
+        
+        st.markdown("<hr style='margin: 5px 0 10px 0;'>", unsafe_allow_html=True)
+        
+        for c in recent:
+            col_d1, col_d2, col_d3, col_d4, col_d5, col_d6, col_d7 = st.columns([1, 2.5, 1.2, 1.2, 1.2, 1.2, 1.2])
+            min_sec = f"{int(c['duration'] // 60)}m {int(c['duration'] % 60):02d}s"
+            upload_date = c["upload_time"][:10] + " " + c["upload_time"][11:16]
+            score_str = f"{int(c['score'])}/100" if c['score'] is not None else "N/A"
+            
+            with col_d1:
+                if st.button(f"#{c['id']}", key=f"btn_nav_dash_{c['id']}", help="Open Analysis Scorecard"):
+                    st.session_state["selected_call_id"] = c["id"]
+                    st.session_state["current_page"] = "History"
+                    st.rerun()
+            with col_d2:
+                st.write(c["filename"])
+            with col_d3:
+                st.write(upload_date)
+            with col_d4:
+                st.write(min_sec)
+            with col_d5:
+                st.write(score_str)
+            with col_d6:
+                st.write(c["status"])
+            with col_d7:
+                st.write(c.get("issues_flagged", 0))
+                
+            st.markdown("<hr style='margin: 5px 0;'>", unsafe_allow_html=True)
+    else:
+        st.info("No recent call activity logs.")
+
 
 def render_history_view(db: Session):
     """
@@ -230,8 +507,41 @@ def render_history_view(db: Session):
         st.info("💡 **No calls have been analyzed yet.** Head over to the Home view to upload an audio conversation.")
         return
 
-    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">📋 Call Audit Logs</h2>', unsafe_allow_html=True)
+    # Title & Action columns
+    col_title, col_actions = st.columns([3, 1.5])
+    with col_title:
+        st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;margin:0;">📋 Call Audit Logs</h2>', unsafe_allow_html=True)
+    with col_actions:
+        if "delete_mode" not in st.session_state:
+            st.session_state["delete_mode"] = False
+            
+        btn_label = "❌ Cancel Selection" if st.session_state["delete_mode"] else "🗑️ Delete History"
+        if st.button(btn_label, use_container_width=True):
+            st.session_state["delete_mode"] = not st.session_state["delete_mode"]
+            st.rerun()
+
     st.markdown("---")
+
+    # Suggestion alert to export before deleting
+    if st.session_state["delete_mode"]:
+        st.warning("💡 **Suggestion:** We highly recommend exporting the cumulative history report (PDF) before permanently deleting data.")
+
+    # Cumulative PDF Export Button
+    try:
+        from datetime import datetime
+        from backend.app.services.pdf_service import PDFService
+        pdf_bytes = PDFService.generate_cumulative_pdf(db)
+        if pdf_bytes:
+            st.download_button(
+                label="📥 Export Cumulative History Report (PDF)",
+                data=pdf_bytes,
+                file_name=f"fitnova_cumulative_history_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+            st.markdown("<br>", unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Error loading PDF exporter: {e}")
 
     # Filters and Search tools
     search_query = st.text_input("🔍 Search by filename...", "").strip().lower()
@@ -245,6 +555,39 @@ def render_history_view(db: Session):
         st.warning("No call logs match your query filters.")
         return
 
+    # Delete mode controls (Select All & Delete Selected)
+    if st.session_state["delete_mode"]:
+        c_sel, c_space = st.columns([2, 3])
+        with c_sel:
+            def toggle_select_all():
+                val = st.session_state["select_all_logs_checkbox"]
+                for r in filtered_history:
+                    st.session_state[f"sel_del_{r['id']}"] = val
+            st.checkbox("Select All Logs", key="select_all_logs_checkbox", on_change=toggle_select_all)
+            
+        # Compile selected IDs
+        selected_ids = []
+        for run in filtered_history:
+            if st.session_state.get(f"sel_del_{run['id']}", False):
+                selected_ids.append(run["id"])
+                
+        if selected_ids:
+            st.markdown(f"<div style='background-color:#fff5f5;border:1px solid #fecaca;padding:16px;border-radius:8px;margin-bottom:15px;'>", unsafe_allow_html=True)
+            col_msg, col_wipe = st.columns([3, 1])
+            with col_msg:
+                st.markdown(f"<span style='color:#991b1b;font-weight:700;'>Selected {len(selected_ids)} call recording(s) for permanent deletion.</span>", unsafe_allow_html=True)
+                confirm_del = st.checkbox("Confirm permanent deletion.", key="confirm_delete_selected_checkbox")
+            with col_wipe:
+                if st.button("🗑️ Wipe Selected", type="primary", use_container_width=True, disabled=not confirm_del):
+                    try:
+                        DashboardService.delete_calls(db, selected_ids)
+                        st.toast(f"Successfully deleted {len(selected_ids)} calls!", icon="🗑️")
+                        st.session_state["delete_mode"] = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error during deletion: {e}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
     # Render History items inside expander/cards
     for run in filtered_history:
         score_badge = f"<span style='background-color:#f1f5f9;color:#475569;font-weight:600;padding:4px 8px;border-radius:4px;'>None</span>"
@@ -257,26 +600,46 @@ def render_history_view(db: Session):
         
         min_sec = f"{int(run['duration'] // 60)}m {int(run['duration'] % 60)}s"
 
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            st.markdown(
-                f"<div style='margin-bottom:4px;'>"
-                f"<strong style='font-size:1.1rem;color:#0f172a;'>{run['filename']}</strong><br>"
-                f"<small style='color:#64748b;'>Uploaded on: {run['upload_time'][:16].replace('T', ' ')} | Duration: {min_sec}</small>"
-                f"</div>", unsafe_allow_html=True
-            )
-        with col2:
-            st.markdown(f"<div style='margin-top:8px;'>Score: {score_badge} | Status: {status_badge}</div>", unsafe_allow_html=True)
-        with col3:
-            if st.button("View Audit Scorecard 🔍", key=f"btn_view_{run['id']}", use_container_width=True):
-                st.session_state["selected_call_id"] = run["id"]
-                st.rerun()
+        if st.session_state["delete_mode"]:
+            col_chk, col_info, col_badge, col_btn = st.columns([0.4, 2.6, 1, 1])
+            with col_chk:
+                st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+                st.checkbox("", key=f"sel_del_{run['id']}", label_visibility="collapsed")
+            with col_info:
+                st.markdown(
+                    f"<div style='margin-bottom:4px;'>"
+                    f"<strong style='font-size:1.1rem;color:#0f172a;'>{run['filename']}</strong><br>"
+                    f"<small style='color:#64748b;'>Uploaded on: {run['upload_time'][:16].replace('T', ' ')} | Duration: {min_sec}</small>"
+                    f"</div>", unsafe_allow_html=True
+                )
+            with col_badge:
+                st.markdown(f"<div style='margin-top:8px;'>Score: {score_badge} | Status: {status_badge}</div>", unsafe_allow_html=True)
+            with col_btn:
+                if st.button("View Audit Scorecard 🔍", key=f"btn_view_{run['id']}", use_container_width=True):
+                    st.session_state["selected_call_id"] = run["id"]
+                    st.rerun()
+        else:
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.markdown(
+                    f"<div style='margin-bottom:4px;'>"
+                    f"<strong style='font-size:1.1rem;color:#0f172a;'>{run['filename']}</strong><br>"
+                    f"<small style='color:#64748b;'>Uploaded on: {run['upload_time'][:16].replace('T', ' ')} | Duration: {min_sec}</small>"
+                    f"</div>", unsafe_allow_html=True
+                )
+            with col2:
+                st.markdown(f"<div style='margin-top:8px;'>Score: {score_badge} | Status: {status_badge}</div>", unsafe_allow_html=True)
+            with col3:
+                if st.button("View Audit Scorecard 🔍", key=f"btn_view_{run['id']}", use_container_width=True):
+                    st.session_state["selected_call_id"] = run["id"]
+                    st.rerun()
         st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
 
 
 def render_call_details_view(call_id: int, db: Session):
     """
     Renders the unified scorecard tabs for a specific call analysis output.
+    Supports historical versions, corrections, reviews, and overrides.
     """
     details = DashboardService.get_call_details(db, call_id)
     if not details:
@@ -288,22 +651,69 @@ def render_call_details_view(call_id: int, db: Session):
         return
 
     # Breadcrumbs & Title
-    col_back, col_title = st.columns([1, 5])
+    col_back, col_export, col_title = st.columns([1.2, 1.5, 4.3])
     with col_back:
         if st.button("⬅ Back to History", use_container_width=True):
             if "selected_call_id" in st.session_state:
                 del st.session_state["selected_call_id"]
             st.rerun()
+    with col_export:
+        try:
+            from backend.app.services.pdf_service import PDFService
+            pdf_bytes = PDFService.generate_single_call_pdf(db, call_id)
+            if pdf_bytes:
+                st.download_button(
+                    label="📥 Export Scorecard (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"fitnova_scorecard_call_{call_id}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+        except Exception as e:
+            st.error(f"Export error: {e}")
     
     meta = details["metadata"]
-    
     st.markdown(f"<h3 style='margin-top:10px;'>🔍 Scorecard: {meta['original_filename']}</h3>", unsafe_allow_html=True)
+    st.markdown(f"<small style='color:#64748b;'>Source: `{meta.get('source', 'Upload')}` | Vendor: `{meta.get('vendor', 'Direct')}` | Created At: {meta['created_at']}</small>", unsafe_allow_html=True)
     st.markdown("---")
 
-    # Renders 5 Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview", "Speech Transcript", "Advisor/Customer Chat", "Gemini Process Trace", "Pipeline Timeline"])
+    # Load version histories
+    from backend.app.services.feedback_service import FeedbackService
+    history_versions = FeedbackService.get_version_history(db, call_id)
 
-    with tab1:
+    # Revision Selectors
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        t_vers = ["Active Version"] + [f"v{v['version']} (Saved {v['created_at'][11:16]})" for v in history_versions["transcripts"]]
+        selected_ver = st.selectbox("📂 Dialogue revision:", t_vers)
+        if selected_ver != "Active Version":
+            v_num = int(selected_ver.split(" ")[0][1:])
+            for v_record in history_versions["transcripts"]:
+                if v_record["version"] == v_num:
+                    details["transcript"] = load_json(v_record["file_path"])
+            for v_record in history_versions["conversations"]:
+                if v_record["version"] == v_num:
+                    details["conversation"] = load_json(v_record["file_path"])
+
+    with col_v2:
+        a_vers = ["Active Scorecard"] + [f"v{v['version']} (Score: {v['overall_score']})" for v in history_versions["analyses"]]
+        selected_a_ver = st.selectbox("📊 Scorecard revision:", a_vers)
+        if selected_a_ver != "Active Scorecard":
+            av_num = int(selected_a_ver.split(" ")[0][1:])
+            for v_record in history_versions["analyses"]:
+                if v_record["version"] == av_num:
+                    details["analysis"] = load_json(v_record["file_path"])
+
+    # Render horizontal navigation selector to prevent tall DOM heights and scroll jumping!
+    selected_section = st.radio(
+        "Select scorecard tab view:",
+        ["Overview", "Speech Transcript", "Advisor/Customer Chat", "Gemini Process Trace", "Pipeline Timeline", "✍️ Human Feedback Loop"],
+        horizontal=True,
+        key=f"call_detail_section_selector_{call_id}",
+        label_visibility="collapsed"
+    )
+
+    if selected_section == "Overview":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>AI Audit Summary</h4>", unsafe_allow_html=True)
         
         analysis = details["analysis"]
@@ -349,11 +759,13 @@ def render_call_details_view(call_id: int, db: Session):
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("<h5 style='color:#ef4444;font-weight:600;'>Compliance Violations</h5>", unsafe_allow_html=True)
             
-            # Fetch tags dynamically from DB analysis details mapping
+            from backend.app.models.analysis import CallAnalysis
             db_analysis = db.query(CallAnalysis).filter(CallAnalysis.call_id == call_id).first()
             if db_analysis and db_analysis.issue_tags:
                 for tag in db_analysis.issue_tags:
                     badge_color = "#ef4444" if tag.severity.value in ["Critical", "High"] else "#f59e0b"
+                    comment_html = f"<br><small style='color:#6366f1;'><strong>Feedback Status:</strong> {tag.review_status} | <strong>Comments:</strong> {tag.reviewer_comments or 'None'}</small>" if getattr(tag, "review_status", None) else ""
+                    
                     st.markdown(
                         f"<div style='border:1px solid #f1f5f9;background-color:#fafafa;padding:12px;border-radius:6px;margin-bottom:8px;'>"
                         f"<strong>Tag:</strong> {tag.tag} | "
@@ -361,12 +773,13 @@ def render_call_details_view(call_id: int, db: Session):
                         f"Timestamp: <span style='color:#64748b;'>{tag.timestamp}s</span><br>"
                         f"<em>Quote: \"{tag.quote}\"</em><br>"
                         f"<small style='color:#64748b;'><strong>Reason:</strong> {tag.reason}</small>"
+                        f"{comment_html}"
                         f"</div>", unsafe_allow_html=True
                     )
             else:
                 st.success("Clean compliance audit. No issue tags flagged.")
 
-    with tab2:
+    elif selected_section == "Speech Transcript":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Full Speech Transcription</h4>", unsafe_allow_html=True)
         transcript = details["transcript"]
         if not transcript or "segments" not in transcript:
@@ -376,7 +789,7 @@ def render_call_details_view(call_id: int, db: Session):
                 min_sec = f"{int(seg['start'] // 60)}:{int(seg['start'] % 60):02d}"
                 st.markdown(f"**[{min_sec}]** {seg['text']}")
 
-    with tab3:
+    elif selected_section == "Advisor/Customer Chat":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Advisor vs. Customer Conversation</h4>", unsafe_allow_html=True)
         conv = details["conversation"]
         if not conv or "segments" not in conv:
@@ -394,7 +807,7 @@ def render_call_details_view(call_id: int, db: Session):
                     f"</div>", unsafe_allow_html=True
                 )
 
-    with tab4:
+    elif selected_section == "Gemini Process Trace":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Multi-Agent Gemini Process Log</h4>", unsafe_allow_html=True)
         analysis = details["analysis"]
         if not analysis or "analysis_metadata" not in analysis:
@@ -402,7 +815,7 @@ def render_call_details_view(call_id: int, db: Session):
         else:
             st.json(analysis["analysis_metadata"])
 
-    with tab5:
+    elif selected_section == "Pipeline Timeline":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Pipeline Progression Timeline</h4>", unsafe_allow_html=True)
         timeline = details["timeline"]
         if not timeline:
@@ -410,3 +823,233 @@ def render_call_details_view(call_id: int, db: Session):
         else:
             for event in timeline:
                 st.markdown(f"✔️ **{event['event']}** — <small style='color:#64748b;'>{event['timestamp']}</small>", unsafe_allow_html=True)
+
+    elif selected_section == "✍️ Human Feedback Loop":
+        st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>✍️ Human Feedback Loop Panel</h4>", unsafe_allow_html=True)
+        
+        # Sub-tabs for the 4 sections
+        sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs([
+            "📝 Dialogue Corrections",
+            "⚠️ Violations Review",
+            "⚙️ Score Override",
+            "🔄 AI Re-Analysis"
+        ])
+
+        with sub_tab1:
+            st.markdown("##### 1. Edit Speaker Dialogues & Transcript Text")
+            conv = details["conversation"]
+            if not conv or "segments" not in conv:
+                st.warning("Conversation text segments unavailable.")
+            else:
+                with st.expander("📝 Correct Transcript Dialogues & Speaker Labels", expanded=True):
+                    st.info("Edit text areas directly or map speaker identities. Click Save to record corrections version.")
+                    st.markdown("### Conversation")
+                    
+                    corrections = []
+                    speaker_updates = []
+                    
+                    # To prevent lag, display maximum of 50 segments
+                    seg_limit = min(50, len(conv["segments"]))
+                    for i in range(seg_limit):
+                        seg = conv["segments"][i]
+                        
+                        # Dropdown for speaker
+                        opts = ["Advisor", "Customer", "Unknown"]
+                        def_idx = opts.index(seg["speaker"]) if seg["speaker"] in opts else 2
+                        spk_val = st.selectbox(f"Speaker #{i+1}", opts, index=def_idx, key=f"spk_ed_{call_id}_{i}", label_visibility="collapsed")
+                        
+                        # Text area for message
+                        txt_val = st.text_area(f"Text #{i+1}", value=seg["text"], key=f"txt_ed_{call_id}_{i}", label_visibility="collapsed", height=68)
+                        
+                        if spk_val != seg["speaker"]:
+                            speaker_updates.append({"index": i, "speaker": spk_val})
+                        if txt_val != seg["text"]:
+                            corrections.append({"index": i, "text": txt_val})
+                            
+                        st.markdown("<hr style='margin: 8px 0; border-top: 1px dashed #cbd5e1;'>", unsafe_allow_html=True)
+                    
+                    if st.button("Save Dialogue Corrections", type="primary", use_container_width=True):
+                        if corrections or speaker_updates:
+                            if corrections:
+                                FeedbackService.correct_transcript(db, call_id, corrections)
+                            if speaker_updates:
+                                FeedbackService.correct_speakers(db, call_id, speaker_updates)
+                            st.success("Dialogue corrections saved successfully! Revisions created.")
+                            st.rerun()
+                        else:
+                            st.info("No modifications detected.")
+
+        with sub_tab2:
+            st.markdown("##### 2. Audit Compliance Violations Review")
+            from backend.app.models.analysis import CallAnalysis
+            db_analysis = db.query(CallAnalysis).filter(CallAnalysis.call_id == call_id).first()
+            
+            if db_analysis and db_analysis.issue_tags:
+                # Two-column layout
+                col_left, col_right = st.columns([1, 2])
+                
+                with col_left:
+                    st.markdown("###### Detected Violations")
+                    violation_labels = []
+                    violation_map = {}
+                    for tag in db_analysis.issue_tags:
+                        sev_icon = "🔴" if tag.severity.value == "Critical" else ("🟠" if tag.severity.value == "High" else ("🟡" if tag.severity.value == "Medium" else "🟢"))
+                        conf_val = int(tag.confidence) if getattr(tag, "confidence", None) is not None else 85
+                        label = f"{sev_icon} {tag.tag} ({conf_val}%)"
+                        violation_labels.append(label)
+                        violation_map[label] = tag
+                        
+                    # Radio list to select violation
+                    selected_label = st.radio(
+                        "Select violation:",
+                        options=violation_labels,
+                        key=f"sel_violation_{call_id}",
+                        label_visibility="collapsed"
+                    )
+                    selected_tag = violation_map[selected_label]
+                    
+                with col_right:
+                    # Section 1 - AI Decision
+                    st.markdown("###### Section 1 — AI Decision")
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1:
+                        st.metric("Severity", selected_tag.severity.value)
+                    with c2:
+                        conf_pct = int(selected_tag.confidence) if getattr(selected_tag, "confidence", None) is not None else 85
+                        st.metric("AI Confidence", f"{conf_pct}%")
+                    with c3:
+                        st.metric("Status", selected_tag.review_status)
+                    with c4:
+                        st.metric("Detection", "AI Flagged")
+                        
+                    st.markdown("---")
+                    
+                    # Section 2 - Why AI Flagged This
+                    st.markdown("###### Section 2 — Why AI Flagged This")
+                    st.markdown(f"**Reason:**\n{selected_tag.reason}")
+                    
+                    st.markdown("---")
+                    
+                    # Section 3 - Transcript Evidence
+                    st.markdown("###### Section 3 — Transcript Evidence")
+                    import json
+                    evidence = []
+                    if getattr(selected_tag, "evidence_segments", None):
+                        try:
+                            evidence = json.loads(selected_tag.evidence_segments)
+                        except:
+                            pass
+                            
+                    if evidence:
+                        for seg in evidence:
+                            raw_start = seg.get("start_time", 0.0)
+                            m_sec = f"{int(raw_start // 60):02d}:{int(raw_start % 60):02d}"
+                            
+                            st.markdown(
+                                f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
+                                f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> "
+                                f"<strong style='color: #1e293b;'>{seg.get('speaker', 'Speaker')}:</strong> {seg.get('transcript_text', '')}"
+                                f"</div>", unsafe_allow_html=True
+                            )
+                    else:
+                        m_sec = f"{int(selected_tag.timestamp // 60):02d}:{int(selected_tag.timestamp % 60):02d}"
+                        st.markdown(
+                            f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
+                            f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> {selected_tag.quote}"
+                            f"</div>", unsafe_allow_html=True
+                        )
+                        
+                    st.markdown("---")
+                    
+                    # Section 4 - Reviewer Decision
+                    st.markdown("###### Section 4 — Reviewer Decision")
+                    with st.form(f"form_single_violation_review_{selected_tag.id}"):
+                        col_dec1, col_dec2 = st.columns(2)
+                        with col_dec1:
+                            dec_opts = ["Approve", "Dismiss", "False Positive", "Needs Investigation"]
+                            cur_dec = selected_tag.review_status
+                            dec_idx = dec_opts.index(cur_dec) if cur_dec in dec_opts else 0
+                            decision_val = st.selectbox("Decision", dec_opts, index=dec_idx)
+                        with col_dec2:
+                            sev_opts = ["Critical", "High", "Medium", "Low"]
+                            cur_sev = selected_tag.severity.value
+                            sev_idx = sev_opts.index(cur_sev) if cur_sev in sev_opts else 2
+                            severity_val = st.selectbox("Severity Override", sev_opts, index=sev_idx)
+                            
+                        comment_val = st.text_area("Reviewer Comment", value=getattr(selected_tag, "reviewer_comments", "") or "")
+                        
+                        # Section 6 - Save Review
+                        submitted = st.form_submit_button("Save Review", use_container_width=True)
+                        if submitted:
+                            FeedbackService.review_issue(
+                                db=db,
+                                issue_id=selected_tag.id,
+                                review_status=decision_val,
+                                reviewer_comments=comment_val,
+                                severity=severity_val
+                            )
+                            st.success(f"Successfully saved review for {selected_tag.tag}!")
+                            st.rerun()
+                            
+                    st.markdown("---")
+                    
+                    # Section 5 - AI Recommendation
+                    st.markdown("###### Section 5 — AI Coaching Suggestions")
+                    st.info(getattr(selected_tag, 'recommendation', 'N/A') or 'N/A')
+                    
+                # Reviewer Summary
+                st.markdown("---")
+                st.markdown("##### Reviewer Summary")
+                app_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "Approve")
+                dsm_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "Dismiss")
+                fp_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "False Positive")
+                pending_c = sum(1 for t in db_analysis.issue_tags if t.review_status in ["Pending", "Needs Human Review"])
+                
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                with sc1:
+                    st.metric("Approved", app_c)
+                with sc2:
+                    st.metric("Dismissed", dsm_c)
+                with sc3:
+                    st.metric("False Positives", fp_c)
+                with sc4:
+                    st.metric("Pending Reviews", pending_c)
+            else:
+                st.success("No compliance issue violations to review for this call.")
+
+        with sub_tab3:
+            st.markdown("##### 3. Quality Score Manual Override")
+            current_sc = int(round(details["analysis"]["overall_score"])) if details["analysis"] else 80
+            
+            # Number input with up/down spinner arrows (no horizontal scrollbar)
+            h_score = st.number_input(
+                "Human Evaluator Override Score (0 - 100):",
+                min_value=0,
+                max_value=100,
+                value=current_sc,
+                step=1
+            )
+            h_reason = st.text_area("Justification / Rationale for manual override:")
+            h_reviewer = st.text_input("Reviewer Name:")
+            
+            if st.button("Apply Score Override", type="primary", use_container_width=True):
+                if not h_reason.strip() or not h_reviewer.strip():
+                    st.error("Reviewer name and override justification reason are required fields.")
+                else:
+                    FeedbackService.override_score(db, call_id, float(h_score), h_reason, h_reviewer)
+                    st.success("Manual override scorecard score saved successfully!")
+                    st.rerun()
+
+        with sub_tab4:
+            st.markdown("##### 4. Trigger Gemini AI Re-Evaluation")
+            st.info("Re-run Needs Discovery checklist, Objection handling, and Compliance scorecards on the human-corrected dialogue transcripts.")
+            has_completed_review = any(t.review_status != "Pending" for t in db_analysis.issue_tags) if db_analysis and db_analysis.issue_tags else False
+            
+            if st.button("Run AI Re-analysis", type="primary", use_container_width=True, disabled=not has_completed_review):
+                with st.spinner("Executing multi-agent Gemini scoring pipeline..."):
+                    try:
+                        FeedbackService.reanalyze(db, call_id)
+                        st.success("Re-analysis complete! New scorecard revision created successfully.")
+                        st.rerun()
+                    except Exception as re_e:
+                        st.error(f"Failed to execute re-analysis: {re_e}")

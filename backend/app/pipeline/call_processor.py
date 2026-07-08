@@ -50,7 +50,7 @@ class CallProcessor:
                 return
 
             # 2. Transition Status: Processing
-            self._change_status(db, call, CallStatus.Processing)
+            self._change_status(db, call, CallStatus.Processing, progress=15)
             log_pipeline_event(call_id, "Processing Started")
 
             # 3. Sequential Stage Executions
@@ -78,11 +78,13 @@ class CallProcessor:
         finally:
             db.close()
 
-    def _change_status(self, db: Session, call: CallModel, status: CallStatus) -> None:
+    def _change_status(self, db: Session, call: CallModel, status: CallStatus, progress: int = None) -> None:
         """
         Helper method to transition call statuses on the database transaction layer.
         """
         call.status = status
+        if progress is not None:
+            call.progress = progress
         db.commit()
         db.refresh(call)
 
@@ -107,6 +109,8 @@ class CallProcessor:
         # Delegate storage operations to the TranscriptStorageService
         TranscriptStorageService.persist_transcript(db, call.id, result)
         log_pipeline_event(call.id, "Transcript Stored")
+        
+        self._change_status(db, call, CallStatus.Processing, progress=45)
 
     def _diarize(self, db: Session, call: CallModel) -> None:
         """
@@ -127,6 +131,8 @@ class CallProcessor:
         # Delegate conversation persistence to the storage service
         ConversationStorageService.persist_conversation(db, call.id, result)
         log_pipeline_event(call.id, "Conversation Stored")
+        
+        self._change_status(db, call, CallStatus.Processing, progress=70)
 
     def _redact_pii(self, db: Session, call: CallModel) -> None:
         """
@@ -134,6 +140,8 @@ class CallProcessor:
         """
         log_pipeline_event(call.id, "PII Redaction Started")
         logger.info("PII placeholder executed")
+        
+        self._change_status(db, call, CallStatus.Processing, progress=80)
 
     def _analyze(self, db: Session, call: CallModel) -> None:
         """
@@ -156,12 +164,14 @@ class CallProcessor:
         # Persist scorecards output
         AnalysisStorageService.persist_analysis(db, call.id, result)
         log_pipeline_event(call.id, "Analysis Stored")
+        
+        self._change_status(db, call, CallStatus.Processing, progress=95)
 
     def _complete(self, db: Session, call: CallModel) -> None:
         """
         Finalizes call processing, transitioning status to Completed.
         """
-        self._change_status(db, call, CallStatus.Completed)
+        self._change_status(db, call, CallStatus.Completed, progress=100)
         log_pipeline_event(call.id, "Completed")
         logger.info("Pipeline completed successfully")
 
@@ -169,6 +179,6 @@ class CallProcessor:
         """
         Marks call processing as Failed on error.
         """
-        self._change_status(db, call, CallStatus.Failed)
+        self._change_status(db, call, CallStatus.Failed, progress=100)
         log_pipeline_event(call.id, "Failed")
         logger.info(f"Pipeline marked as Failed: {error}")

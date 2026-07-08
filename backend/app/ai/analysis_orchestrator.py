@@ -84,7 +84,13 @@ class AnalysisOrchestrator:
         # Helper method to deduplicate lists while preserving order
         def deduplicate(items: list) -> list:
             seen = set()
-            return [x for x in items if not (x in seen or seen.add(x))]
+            res = []
+            for x in items:
+                key = x.tag.strip().lower() if hasattr(x, "tag") else str(x).strip().lower()
+                if key not in seen:
+                    seen.add(key)
+                    res.append(x)
+            return res
 
         # 5. Merge Outputs & Calculate Overall Score
         scores = []

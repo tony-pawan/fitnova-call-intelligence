@@ -12,6 +12,15 @@ class CallBase(BaseSchema):
     status: CallStatus = Field(default=CallStatus.Uploaded)
     duration_seconds: float = Field(default=0.0, ge=0.0, description="Duration in seconds (must be non-negative)")
     language: Optional[str] = Field(default="en", min_length=1, max_length=50)
+    progress: int = Field(default=0, ge=0, le=100, description="Pipeline progression percentage")
+    
+    # Ingestion Source properties
+    source: Optional[str] = Field(default="Upload")
+    vendor: Optional[str] = Field(default="Direct")
+    external_call_id: Optional[str] = Field(default=None)
+    customer_name: Optional[str] = Field(default=None)
+    advisor_name: Optional[str] = Field(default=None)
+    ingestion_metadata: Optional[str] = Field(default=None)
 
 class CallCreate(CallBase):
     pass
@@ -25,6 +34,12 @@ class CallUpdate(BaseSchema):
     status: Optional[CallStatus] = Field(None)
     duration_seconds: Optional[float] = Field(None, ge=0.0)
     language: Optional[str] = Field(None, min_length=1, max_length=50)
+    source: Optional[str] = Field(None)
+    vendor: Optional[str] = Field(None)
+    external_call_id: Optional[str] = Field(None)
+    customer_name: Optional[str] = Field(None)
+    advisor_name: Optional[str] = Field(None)
+    ingestion_metadata: Optional[str] = Field(None)
 
 class Call(CallBase, TimestampSchema):
     id: int

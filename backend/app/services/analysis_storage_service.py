@@ -33,14 +33,48 @@ class AnalysisStorageService:
                 recommendation=recs_text
             )
             
-            # Map raw issue tag strings to DB model constraints using default severity/reasons
-            for tag_str in result.issue_tags:
+            # Map raw issue tag details to DB models
+            seen_tags = set()
+            import json
+            for tag_detail in result.issue_tags:
+                clean_t = tag_detail.tag.strip()
+                norm_t = clean_t.lower()
+                if norm_t in ["none", "no issues", "no violations", "none detected", "no compliance issues", "no compliance violations", "n/a", "null", ""]:
+                    continue
+                if norm_t in seen_tags:
+                    continue
+                seen_tags.add(norm_t)
+                
+                # Check severity mapping
+                from backend.app.models.issue_tag import Severity as DBSeverity
+                db_sev = DBSeverity.Medium
+                try:
+                    sev_str = tag_detail.severity.strip().capitalize()
+                    if sev_str in ["Low", "Medium", "High", "Critical"]:
+                        db_sev = DBSeverity[sev_str]
+                except:
+                    pass
+                
+                # Compute timestamp and quote from evidence segments
+                first_timestamp = 0.0
+                combined_quote = "Detected during conversation audit."
+                
+                if tag_detail.evidence_segments:
+                    first_timestamp = tag_detail.evidence_segments[0].start_time
+                    combined_quote = " | ".join(f"{ev.speaker}: {ev.transcript_text}" for ev in tag_detail.evidence_segments)
+                
+                # Serialize evidence segments
+                serialized_evidence = json.dumps([ev.model_dump() for ev in tag_detail.evidence_segments])
+                
                 db_tag = IssueTagModel(
-                    tag=tag_str,
-                    severity=Severity.Medium,
-                    timestamp=0.0,
-                    quote="Detected during conversation audit.",
-                    reason="Flagged by AI analysis agent."
+                    tag=clean_t,
+                    severity=db_sev,
+                    timestamp=first_timestamp,
+                    quote=combined_quote,
+                    reason=tag_detail.reason,
+                    confidence=tag_detail.confidence,
+                    recommendation=tag_detail.recommendation,
+                    evidence_segments=serialized_evidence
                 )
                 db_analysis.issue_tags.append(db_tag)
 
@@ -61,7 +95,7 @@ class AnalysisStorageService:
             "strengths": result.strengths,
             "weaknesses": result.weaknesses,
             "recommendations": result.recommendations,
-            "issue_tags": result.issue_tags,
+            "issue_tags": [tag.model_dump() for tag in result.issue_tags],
             "analysis_metadata": {
                 "model": result.analysis_metadata.model,
                 "processing_time": result.analysis_metadata.processing_time,

@@ -13,7 +13,11 @@ class ComplianceAnalyzer:
         self.client = client or GeminiClient()
 
     def analyze(self, conversation: ConversationResult) -> ComplianceAnalysis:
-        conversation_text = "\n".join(f"{s.speaker}: {s.text}" for s in conversation.segments)
+        # Convert structured conversation into text representation with timestamps and ID markers
+        conversation_text = "\n".join(
+            f"[{s.start:.1f}s - {s.end:.1f}s] (ID: {idx}) {s.speaker}: {s.text}"
+            for idx, s in enumerate(conversation.segments)
+        )
         
         schema_json = json.dumps(ComplianceAnalysis.model_json_schema(), indent=2)
         prompt = PromptLoader.load_prompt("compliance", conversation_text, schema_json)

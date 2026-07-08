@@ -12,28 +12,31 @@ def render_sidebar():
     """
     Renders the custom single-user navigation sidebar.
     """
-    st.markdown('<div class="sidebar-header">⚡ FitNova AI</div>', unsafe_allow_html=True)
-    st.markdown("---")
+    with st.sidebar:
+        st.markdown('<div class="sidebar-header">⚡ FitNova AI</div>', unsafe_allow_html=True)
+        st.markdown("---")
 
-    if "current_page" not in st.session_state:
-        st.session_state["current_page"] = "Home"
+        if "current_page" not in st.session_state:
+            st.session_state["current_page"] = "Home"
 
-    menu_options = ["Home", "Dashboard", "History"]
-    icons = {"Home": "🏠", "Dashboard": "📈", "History": "📋"}
+        menu_options = ["Home", "Dashboard", "History"]
+        icons = {"Home": "🏠", "Dashboard": "📈", "History": "📋"}
 
-    # Single-user navigation radio
-    selected_page = st.radio(
-        "Navigation:",
-        options=menu_options,
-        index=menu_options.index(st.session_state["current_page"]),
-        format_func=lambda x: f"{icons.get(x, '')} {x}",
-        key="navigation_selector"
-    )
+        # Single-user navigation radio
+        selected_page = st.radio(
+            "Navigation:",
+            options=menu_options,
+            index=menu_options.index(st.session_state["current_page"]),
+            format_func=lambda x: f"{icons.get(x, '')} {x}"
+        )
 
-    # Force view routing changes to refresh active views
-    if selected_page != st.session_state["current_page"]:
-        st.session_state["current_page"] = selected_page
-        # Clear selected call when navigating away from history/details
-        if "selected_call_id" in st.session_state and selected_page != "History":
-            del st.session_state["selected_call_id"]
-        st.rerun()
+        # Force view routing changes to refresh active views
+        if selected_page != st.session_state["current_page"]:
+            st.session_state["current_page"] = selected_page
+            # Clear selected call when navigating away from history/details
+            if "selected_call_id" in st.session_state and selected_page != "History":
+                del st.session_state["selected_call_id"]
+            st.rerun()
+
+        st.markdown("<div style='text-align:center;color:#94a3b8;font-size:0.8rem;margin-top:50px;'>FitNova Sales Intelligence v1.0.0</div>", unsafe_allow_html=True)
+

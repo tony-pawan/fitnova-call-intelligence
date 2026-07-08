@@ -52,11 +52,20 @@ def validate_and_parse_json(client: GeminiClient, raw_text: str, conversation_st
             logger.error(f"[{prompt_name.upper()}] JSON repair retry failed: {retry_err}")
             
             # Return structured analyzer failure DTO without crashing the pipeline
+            from backend.app.ai.dto.analysis import IssueTagDetail
+            dummy_detail = IssueTagDetail(
+                tag="Analysis Failure",
+                severity="Critical",
+                confidence=0.0,
+                reason=f"Analyzer execution failed: {str(retry_err)}",
+                recommendation="Please verify API key and configurations.",
+                evidence_segments=[]
+            )
             return schema_class(
                 score=0.0,
                 summary=f"Analyzer execution failed: {str(retry_err)}",
                 strengths=[],
                 weaknesses=[],
                 recommendations=[],
-                issue_tags=["Analysis Failure"]
+                issue_tags=[dummy_detail]
             )

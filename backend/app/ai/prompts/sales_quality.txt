@@ -7,6 +7,8 @@ Conversation Log:
 Evaluate the Advisor's conversational pacing, objection handling, active listening, energy level, closing confidence, and clear call-to-actions.
 Assign a score from 0.0 to 100.0.
 
+For `issue_tags`, populate this array ONLY when actual conversational technique gaps, weak objection handling, poor closing, or communication flaws are observed. If no gaps or technique concerns are found, you must return an empty list `[]`.
+
 Expected output JSON schema:
 {schema}
 

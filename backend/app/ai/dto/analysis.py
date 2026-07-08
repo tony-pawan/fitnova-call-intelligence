@@ -1,6 +1,21 @@
 from typing import List
 from pydantic import BaseModel, Field  # pyrefly: ignore [missing-import]
 
+class EvidenceSegment(BaseModel):
+    segment_id: int
+    start_time: float
+    end_time: float
+    speaker: str
+    transcript_text: str
+
+class IssueTagDetail(BaseModel):
+    tag: str = Field(..., description="Name/Label of compliance violation or sales gap")
+    severity: str = Field("Medium", description="Severity level: Low, Medium, High, or Critical")
+    confidence: float = Field(..., ge=0.0, le=100.0, description="AI confidence score percentage (0-100)")
+    reason: str = Field(..., description="Explain why the AI flagged this violation in this conversation")
+    recommendation: str = Field(..., description="Actionable coaching recommendation or suggestion to avoid this violation")
+    evidence_segments: List[EvidenceSegment] = Field(default_factory=list, description="Transcript segments triggering this violation")
+
 class DiscoveryAnalysis(BaseModel):
     """
     Structured response model for Needs Discovery analyzer checks.
@@ -10,7 +25,7 @@ class DiscoveryAnalysis(BaseModel):
     strengths: List[str] = Field(default_factory=list, description="List of needs discovery strengths identified")
     weaknesses: List[str] = Field(default_factory=list, description="List of needs discovery weaknesses identified")
     recommendations: List[str] = Field(default_factory=list, description="Needs discovery improvements recommendations")
-    issue_tags: List[str] = Field(default_factory=list, description="Associated compliance/discovery risk labels")
+    issue_tags: List[IssueTagDetail] = Field(default_factory=list, description="Associated compliance/discovery risk details")
 
 class ComplianceAnalysis(BaseModel):
     """
@@ -21,7 +36,7 @@ class ComplianceAnalysis(BaseModel):
     strengths: List[str] = Field(default_factory=list, description="Compliance strengths observed")
     weaknesses: List[str] = Field(default_factory=list, description="Compliance failures/risks observed")
     recommendations: List[str] = Field(default_factory=list, description="Compliance compliance improvements recommendations")
-    issue_tags: List[str] = Field(default_factory=list, description="Associated regulatory risk/compliance labels")
+    issue_tags: List[IssueTagDetail] = Field(default_factory=list, description="Associated regulatory risk/compliance details")
 
 class SalesQualityAnalysis(BaseModel):
     """
@@ -32,7 +47,7 @@ class SalesQualityAnalysis(BaseModel):
     strengths: List[str] = Field(default_factory=list, description="Sales quality techniques strengths")
     weaknesses: List[str] = Field(default_factory=list, description="Sales quality techniques weaknesses")
     recommendations: List[str] = Field(default_factory=list, description="Objection/pacing technique improvements")
-    issue_tags: List[str] = Field(default_factory=list, description="Associated sales technique labels")
+    issue_tags: List[IssueTagDetail] = Field(default_factory=list, description="Associated sales technique details")
 
 class AnalysisMetadata(BaseModel):
     """
@@ -53,5 +68,5 @@ class AnalysisResult(BaseModel):
     strengths: List[str] = Field(..., description="Combined deduplicated strengths lists")
     weaknesses: List[str] = Field(..., description="Combined deduplicated weaknesses lists")
     recommendations: List[str] = Field(..., description="Combined deduplicated training recommendations")
-    issue_tags: List[str] = Field(..., description="Deduplicated compliance risk or compliance failure tags")
+    issue_tags: List[IssueTagDetail] = Field(..., description="Deduplicated compliance risk or compliance failure details")
     analysis_metadata: AnalysisMetadata = Field(..., description="Run metadata and analyzer success/failure tracking details")

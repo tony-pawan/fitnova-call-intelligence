@@ -49,28 +49,130 @@ class FasterWhisperTranscriber(Transcriber):
             raise FileNotFoundError(f"Audio file not found at path: {audio_path}")
 
         start_time = time.time()
+        api_key = settings.GEMINI_API_KEY
+        
+        if api_key and api_key != "mock_key_for_development":
+            try:
+                logger.info("Performing transcription via Gemini API for Hinglish accuracy")
+                import google.generativeai as genai
+                from pydantic import BaseModel
+                from typing import List
+                import json
+                
+                genai.configure(api_key=api_key)
+                
+                with open(audio_path, "rb") as f:
+                    audio_bytes = f.read()
+                    
+                ext = os.path.splitext(audio_path)[1].lower()
+                mime_type = "audio/mp3"
+                if ext == ".wav":
+                    mime_type = "audio/wav"
+                elif ext == ".m4a":
+                    mime_type = "audio/m4a"
+                elif ext == ".aac":
+                    mime_type = "audio/aac"
+                    
+                class SegmentSchema(BaseModel):
+                    start: float
+                    end: float
+                    text: str
+                    
+                class TranscriptSchema(BaseModel):
+                    language: str
+                    duration: float
+                    segments: List[SegmentSchema]
+                    
+                prompt = (
+                    "You are an expert verbatim speech-to-text transcriber specializing in Hinglish (mixed Hindi and English). "
+                    "Listen to the audio recording. Transcribe the audio verbatim in Hinglish. "
+                    "For Hindi speech, transcribe it using the Roman/Latin script (e.g. 'haan', 'bolie', 'gym ja rahe' instead of Devanagari script) "
+                    "so that the transcript is Romanized. Do NOT translate the Hindi speech into English. "
+                    "For English speech, transcribe it in English. "
+                    "Output the result in structured JSON format matching the schema."
+                )
+                
+                max_retries = 3
+                backoff = 12.0
+                response_text = None
+                model_name = "gemini-2.5-flash-lite"
+                
+                for attempt in range(max_retries + 1):
+                    try:
+                        logger.info(f"Gemini transcription request started (attempt {attempt + 1})")
+                        model = genai.GenerativeModel(model_name)
+                        response = model.generate_content(
+                            [
+                                {
+                                    "mime_type": mime_type,
+                                    "data": audio_bytes
+                                },
+                                prompt
+                            ],
+                            generation_config=genai.GenerationConfig(
+                                response_mime_type="application/json",
+                                response_schema=TranscriptSchema,
+                                temperature=0.1
+                            )
+                        )
+                        response_text = response.text
+                        break
+                    except Exception as ex:
+                        err_msg = str(ex)
+                        is_rate_limit = "429" in err_msg or "quota" in err_msg or "ResourceExhausted" in err_msg or "rate limit" in err_msg
+                        is_daily_limit = "PerDay" in err_msg or "daily" in err_msg
+                        
+                        if is_rate_limit and not is_daily_limit and attempt < max_retries:
+                            logger.warning(f"Gemini API rate limit exceeded during transcription. Retrying in {backoff} seconds...")
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        raise ex
+                
+                if not response_text:
+                    raise RuntimeError("Empty response received from Gemini transcription")
+                    
+                data = json.loads(response_text)
+                
+                segments = []
+                for s in data.get("segments", []):
+                    segments.append(
+                        TranscriptSegment(
+                            start=round(s.get("start", 0.0), 2),
+                            end=round(s.get("end", 0.0), 2),
+                            text=s.get("text", "").strip(),
+                            confidence=1.0
+                        )
+                    )
+                    
+                execution_time = time.time() - start_time
+                logger.info(f"Gemini transcription successful! Generated {len(segments)} segments in {execution_time:.2f} seconds.")
+                return TranscriptResult(
+                    language=data.get("language", "hi"),
+                    duration=round(data.get("duration", 0.0), 2),
+                    segments=segments
+                )
+            except Exception as e:
+                logger.error(f"Gemini transcription failed: {e}. Falling back to local Faster Whisper.")
+                
+        # --- Local Faster Whisper Fallback ---
+        logger.info("Executing local Faster Whisper transcription")
         model = self.get_model()
-
-        # Execute transcription with Voice Activity Detection (VAD) and beam search quality settings
-        # CT2 returns a generator of segments, which we parse dynamically
         try:
             segments_generator, info = model.transcribe(
                 audio_path,
-                beam_size=2,
+                beam_size=5,
                 vad_filter=True,
-                vad_parameters=dict(min_speech_duration_ms=250)
+                vad_parameters=dict(min_speech_duration_ms=250),
+                initial_prompt="Main Arjun bol raha hoon FitNova se. This is a sales call with a mix of Hindi and English (Hinglish). Haan sir, structure send kar dijiye. Okay sure."
             )
             
             logger.info(f"Language detected: {info.language}")
             
             segments = []
             for segment in segments_generator:
-                # Calculate confidence score if available. 
-                # Whisper segment carries 'avg_logprob' or 'no_speech_prob'
-                # avg_logprob is typical log probability. We translate this or pass it.
                 confidence = None
                 if hasattr(segment, "avg_logprob"):
-                    # Quick math: convert log probability to confidence percentage (0 to 1)
                     import math
                     confidence = round(math.exp(max(segment.avg_logprob, -5.0)), 2)
                     

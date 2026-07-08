@@ -35,10 +35,16 @@ class PyannoteDiarizer(Diarizer):
                 from pyannote.audio import Pipeline as PyannotePipeline  # pyrefly: ignore [missing-import]
                 
                 logger.info(f"Initializing Pyannote Pipeline '{model_name}' on '{device_str}'")
-                cls._pipeline_instance = PyannotePipeline.from_pretrained(
-                    model_name,
-                    use_auth_token=auth_token
-                )
+                try:
+                    cls._pipeline_instance = PyannotePipeline.from_pretrained(
+                        model_name,
+                        token=auth_token
+                    )
+                except TypeError:
+                    cls._pipeline_instance = PyannotePipeline.from_pretrained(
+                        model_name,
+                        use_auth_token=auth_token
+                    )
                 
                 if cls._pipeline_instance is None:
                     raise RuntimeError("Pyannote returned None from pretrained constructor")
@@ -68,11 +74,138 @@ class PyannoteDiarizer(Diarizer):
             raise ValueError("Transcript JSON is empty or corrupted.")
 
         # 2. Execute Pyannote diarization pipeline or use mock fallback
-        auth_token = settings.PYANNOTE_AUTH_TOKEN
-        is_mock = (not auth_token or "mock" in auth_token.lower() or "your_huggingface" in auth_token.lower()) and not ("mock" in type(self.get_pipeline).__name__.lower())
+        gemini_api_key = settings.GEMINI_API_KEY
         
+        if gemini_api_key and gemini_api_key != "mock_key_for_development":
+            try:
+                logger.info("Performing speaker diarization via Gemini API")
+                import google.generativeai as genai
+                from pydantic import BaseModel
+                from typing import List
+                import json
+                
+                genai.configure(api_key=gemini_api_key)
+                
+                with open(audio_path, "rb") as f:
+                    audio_bytes = f.read()
+                    
+                text_segments = []
+                for idx, s in enumerate(transcript_data["segments"]):
+                    text_segments.append({
+                        "index": idx,
+                        "start": s["start"],
+                        "end": s["end"],
+                        "text": s["text"]
+                    })
+                    
+                class DiarizationSegmentSchema(BaseModel):
+                    index: int
+                    speaker: str  # must be "Advisor" or "Customer"
+                    
+                class DiarizationSchema(BaseModel):
+                    segments: List[DiarizationSegmentSchema]
+                    
+                prompt = (
+                    "You are an expert sales call diarizer. You are given an audio file and its transcribed text segments with indices.\n"
+                    "Your task is to assign the correct speaker label ('Advisor' or 'Customer') to each segment index.\n"
+                    "The 'Advisor' represents the FitNova company (pitching, explaining programs, introducing, asking discovery questions).\n"
+                    "The 'Customer' is the person interested in fitness (answering questions, asking about cost, mentioning goals like muscle gain, having objections).\n"
+                    "Listen to the audio context to match speakers accurately to the text.\n"
+                    "Here are the text segments:\n"
+                    f"{json.dumps(text_segments, indent=2)}\n\n"
+                    "Output the result in structured JSON format matching the schema."
+                )
+                
+                ext = os.path.splitext(audio_path)[1].lower()
+                mime_type = "audio/mp3"
+                if ext == ".wav":
+                    mime_type = "audio/wav"
+                elif ext == ".m4a":
+                    mime_type = "audio/m4a"
+                elif ext == ".aac":
+                    mime_type = "audio/aac"
+                    
+                max_retries = 3
+                backoff = 12.0
+                response_text = None
+                model_name = "gemini-2.5-flash-lite"
+                
+                for attempt in range(max_retries + 1):
+                    try:
+                        logger.info(f"Gemini diarization request started (attempt {attempt + 1})")
+                        model = genai.GenerativeModel(model_name)
+                        response = model.generate_content(
+                            [
+                                {
+                                    "mime_type": mime_type,
+                                    "data": audio_bytes
+                                },
+                                prompt
+                            ],
+                            generation_config=genai.GenerationConfig(
+                                response_mime_type="application/json",
+                                response_schema=DiarizationSchema,
+                                temperature=0.1
+                            )
+                        )
+                        response_text = response.text
+                        break
+                    except Exception as ex:
+                        err_msg = str(ex)
+                        is_rate_limit = "429" in err_msg or "quota" in err_msg or "ResourceExhausted" in err_msg or "rate limit" in err_msg
+                        is_daily_limit = "PerDay" in err_msg or "daily" in err_msg
+                        
+                        if is_rate_limit and not is_daily_limit and attempt < max_retries:
+                            logger.warning(f"Gemini API rate limit exceeded during diarization. Retrying in {backoff} seconds...")
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        raise ex
+                        
+                if not response_text:
+                    raise RuntimeError("Empty response received from Gemini diarization")
+                    
+                diarization_data = json.loads(response_text)
+                speaker_map = {item["index"]: item["speaker"] for item in diarization_data.get("segments", [])}
+                
+                conversation_segments = []
+                for idx, segment in enumerate(transcript_data["segments"]):
+                    mapped_spk = speaker_map.get(idx, "Speaker 1")
+                    if mapped_spk not in ["Advisor", "Customer"]:
+                        mapped_spk = "Advisor" if idx % 2 == 0 else "Customer"
+                        
+                    conversation_segments.append(
+                        ConversationSegment(
+                            speaker=mapped_spk,
+                            start=segment["start"],
+                            end=segment["end"],
+                            text=segment["text"]
+                        )
+                    )
+                    
+                execution_time = time.time() - start_time
+                logger.info(f"Gemini speaker diarization successful in {execution_time:.2f} seconds.")
+                return ConversationResult(
+                    language=transcript_data.get("language", "hi"),
+                    duration=transcript_data.get("duration", 0.0),
+                    segments=conversation_segments
+                )
+            except Exception as e:
+                logger.error(f"Gemini speaker diarization failed: {e}. Falling back to Pyannote diarization.")
+                
+        auth_token = settings.PYANNOTE_AUTH_TOKEN
+        is_mock = (not auth_token or "mock" in auth_token.lower() or "your_huggingface" in auth_token.lower())
+        
+        pipeline = None
+        if not is_mock:
+            try:
+                pipeline = self.get_pipeline()
+            except Exception as init_err:
+                logger.warning(f"Failed to initialize live Pyannote pipeline: {init_err}. Falling back to mock diarization mode.")
+                is_mock = True
+
         diarization_turns: List[Dict[str, Any]] = []
-        if is_mock:
+        if is_mock or pipeline is None:
             logger.info("Executing pyannote diarization in mock/fallback mode")
             for idx, segment in enumerate(transcript_data["segments"]):
                 speaker_id = "SPEAKER_00" if idx % 2 == 0 else "SPEAKER_01"
@@ -82,7 +215,6 @@ class PyannoteDiarizer(Diarizer):
                     "speaker": speaker_id
                 })
         else:
-            pipeline = self.get_pipeline()
             try:
                 diarization = pipeline(audio_path)
                 if diarization is not None:
@@ -93,8 +225,15 @@ class PyannoteDiarizer(Diarizer):
                             "speaker": speaker
                         })
             except Exception as e:
-                logger.error(f"Error during pyannote audio execution: {e}")
-                raise RuntimeError(f"Diarization processing failed: {e}")
+                logger.warning(f"Error during pyannote audio execution: {e}. Falling back to mock diarization mode.")
+                diarization_turns = []
+                for idx, segment in enumerate(transcript_data["segments"]):
+                    speaker_id = "SPEAKER_00" if idx % 2 == 0 else "SPEAKER_01"
+                    diarization_turns.append({
+                        "start": segment["start"],
+                        "end": segment["end"],
+                        "speaker": speaker_id
+                    })
             
         # Extract unique speaker labels
         unique_spks = sorted(list(set(t["speaker"] for t in diarization_turns)))

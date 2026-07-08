@@ -1,6 +1,6 @@
 from datetime import datetime
 import enum
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 from sqlalchemy import String, Float, DateTime, ForeignKey, Text, Enum, func  # pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Mapped, mapped_column, relationship  # pyrefly: ignore [missing-import]
 from backend.app.database.base import Base
@@ -33,6 +33,15 @@ class IssueTag(Base):
     quote: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     
+    # Review columns
+    review_status: Mapped[str] = mapped_column(String(100), nullable=False, default="Pending", index=True)
+    reviewer_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # New AI evidence audit columns
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recommendation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_segments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
         server_default=func.now(), 
