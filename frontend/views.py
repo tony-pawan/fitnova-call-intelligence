@@ -359,36 +359,33 @@ def render_dashboard_view(db: Session):
     
     # Load dynamic filter selectors
     from backend.app.services.org_team_advisor_service import OrgTeamAdvisorService
+    from backend.app.schemas.org_team_advisor import OrganizationCreate
+    
     orgs = OrgTeamAdvisorService.list_organizations(db)
-    org_names = ["All Organizations"] + [o.name for o in orgs]
+    fitnova_org = next((o for o in orgs if o.name == "FitNova"), None)
+    if not fitnova_org:
+        org_in = OrganizationCreate(name="FitNova")
+        fitnova_org = OrgTeamAdvisorService.create_organization(db, org_in)
+    f_org_id = fitnova_org.id
     
     st.markdown("<div style='background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-bottom:20px;'>", unsafe_allow_html=True)
     st.markdown("<strong style='color:#475569;'>🔍 Filter Dashboard Metrics</strong>", unsafe_allow_html=True)
-    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    teams = OrgTeamAdvisorService.list_teams(db, org_id=f_org_id)
+    team_names = ["All Teams"] + [t.name for t in teams]
     with col_f1:
-        f_org_name = st.selectbox("Organization Filter:", org_names)
-        
-    f_org_id = None
-    team_names = ["All Teams"]
-    if f_org_name != "All Organizations":
-        org_ref = next(o for o in orgs if o.name == f_org_name)
-        f_org_id = org_ref.id
-        teams = OrgTeamAdvisorService.list_teams(db, org_id=org_ref.id)
-        team_names += [t.name for t in teams]
-        
-    with col_f2:
-        f_team_name = st.selectbox("Team Filter:", team_names, disabled=(f_org_id is None))
+        f_team_name = st.selectbox("Team Filter:", team_names)
         
     f_team_id = None
     advisor_names = ["All Advisors"]
     if f_team_name != "All Teams":
-        teams_list = OrgTeamAdvisorService.list_teams(db, org_id=f_org_id)
-        team_ref = next(t for t in teams_list if t.name == f_team_name)
+        team_ref = next(t for t in teams if t.name == f_team_name)
         f_team_id = team_ref.id
         advisors = OrgTeamAdvisorService.list_advisors(db, team_id=team_ref.id)
         advisor_names += [a.name for a in advisors]
         
-    with col_f3:
+    with col_f2:
         f_advisor_name = st.selectbox("Advisor Filter:", advisor_names, disabled=(f_team_id is None))
         
     f_advisor_id = None
@@ -399,7 +396,7 @@ def render_dashboard_view(db: Session):
         
     sources = OrgTeamAdvisorService.list_ingestion_sources(db)
     source_names = ["All Ingestion Sources"] + [s.name for s in sources]
-    with col_f4:
+    with col_f3:
         f_source_name = st.selectbox("Ingestion Source Filter:", source_names)
         
     f_source_id = None
@@ -443,30 +440,89 @@ def render_dashboard_view(db: Session):
             st.info("Not enough data to calculate timeline trends.")
             
     with col_t2:
-        st.markdown("<h5 style='font-weight:600;'>Score Breakdown by Category</h5>", unsafe_allow_html=True)
+        st.markdown("<h5 style='font-weight:600;'>Sales Capabilities Radar</h5>", unsafe_allow_html=True)
         cat_data = metrics.get("category_scores", {})
         if cat_data:
-            df_cat = pd.DataFrame([{"Evaluation Category": k, "Average Score": v} for k, v in cat_data.items()])
-            fig_cat = px.bar(
-                df_cat,
-                x="Average Score",
-                y="Evaluation Category",
-                orientation="h",
-                color="Evaluation Category",
+            categories = ["Needs Discovery", "Compliance", "Objection Handling", "Closing", "Rapport"]
+            r_values = [cat_data.get(cat, 0.0) for cat in categories]
+            # Close the loop
+            r_values.append(r_values[0])
+            categories_closed = categories + [categories[0]]
+            
+            df_radar = pd.DataFrame({
+                "Score": r_values,
+                "Capability": categories_closed
+            })
+            fig_radar = px.line_polar(
+                df_radar, 
+                r="Score", 
+                theta="Capability", 
+                line_close=True,
                 color_discrete_sequence=["#10b981"]
             )
-            fig_cat.update_layout(xaxis_range=[0, 100], margin=dict(l=20, r=20, t=20, b=20))
-            st.plotly_chart(fig_cat, use_container_width=True)
+            fig_radar.update_traces(fill="toself")
+            fig_radar.update_layout(
+                polar=dict(
+                    radialaxis=dict(visible=True, range=[0, 100])
+                ),
+                margin=dict(l=20, r=20, t=20, b=20)
+            )
+            st.plotly_chart(fig_radar, use_container_width=True)
         else:
             st.info("No category scores aggregated yet.")
 
-    st.markdown(
-        "<div style='background-color:#fafafa; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-top:20px;'>"
-        "<strong>💡 Sales Coaching Tip:</strong><br><small style='color:#475569;'>"
-        "Objection Handling and Needs Discovery segments represent primary quality bottlenecks. "
-        "Focus on training agents to identify budget triggers and ask open-ended questions.</small>"
-        "</div>", unsafe_allow_html=True
-    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col_tp, col_tips = st.columns([2.5, 1.5])
+    with col_tp:
+        team_perf_data = metrics.get("team_performance", [])
+        if team_perf_data:
+            st.markdown("<h5 style='font-weight:600;'>Team Performance Comparison</h5>", unsafe_allow_html=True)
+            rows = []
+            for t in team_perf_data:
+                rows.append({"Team": t["team_name"], "Metric": "AI Quality Score", "Value": t["score"]})
+                rows.append({"Team": t["team_name"], "Metric": "Compliance Score", "Value": t["compliance"]})
+            df_team = pd.DataFrame(rows)
+            fig_team = px.bar(
+                df_team,
+                x="Value",
+                y="Team",
+                color="Metric",
+                barmode="group",
+                orientation="h",
+                color_discrete_map={"AI Quality Score": "#4f46e5", "Compliance Score": "#10b981"}
+            )
+            fig_team.update_layout(xaxis_range=[0, 100], margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_team, use_container_width=True)
+        else:
+            st.info("No team performance metrics available.")
+            
+    with col_tips:
+        st.markdown("<h5 style='font-weight:600;'>💡 Coaching Strategy</h5>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='background-color:#fafafa; border:1px solid #e2e8f0; padding:16px; border-radius:8px;'>"
+            "<strong>Bottleneck Analysis:</strong><br><small style='color:#475569;'>"
+            "Objection Handling and Needs Discovery segments represent primary quality bottlenecks. "
+            "Focus on training agents to identify budget triggers and ask open-ended questions.</small>"
+            "</div>", unsafe_allow_html=True
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    leaderboard_data = metrics.get("advisor_leaderboard", [])
+    if leaderboard_data:
+        st.markdown("<h5 style='font-weight:600;'>Advisor Leaderboard</h5>", unsafe_allow_html=True)
+        df_leader = pd.DataFrame(leaderboard_data)
+        df_leader.columns = ["Advisor Name", "Team", "Calls Processed", "Avg Quality Score", "Avg Compliance Score", "Total Violations"]
+        st.dataframe(
+            df_leader, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Avg Quality Score": st.column_config.NumberColumn(format="%.1f"),
+                "Avg Compliance Score": st.column_config.NumberColumn(format="%.1f")
+            }
+        )
 
     st.markdown("---")
 
@@ -474,25 +530,25 @@ def render_dashboard_view(db: Session):
     st.markdown("#### ⚠️ 2. Compliance & Risk")
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        st.markdown("<h5 style='font-weight:600;'>Compliance & Violations Categories</h5>", unsafe_allow_html=True)
-        issues_data = DashboardService.get_issue_distribution(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
-        if issues_data["top_issues"]:
-            df_issues = pd.DataFrame(issues_data["top_issues"])
-            fig_issues = px.bar(
-                df_issues,
-                x="count",
-                y="tag",
-                orientation="h",
-                labels={"count": "Occurrences", "tag": "Issue Category"},
-                color_discrete_sequence=["#ef4444"]
+        st.markdown("<h5 style='font-weight:600;'>Violation Heatmap by Advisor</h5>", unsafe_allow_html=True)
+        heatmap_data = metrics.get("violation_heatmap", {})
+        if heatmap_data and heatmap_data.get("advisors") and heatmap_data.get("categories") and sum(sum(r) for r in heatmap_data["z"]) > 0:
+            fig_heat = px.imshow(
+                heatmap_data["z"],
+                x=heatmap_data["advisors"],
+                y=heatmap_data["categories"],
+                text_auto=True,
+                color_continuous_scale="Reds",
+                labels=dict(x="Advisor", y="Violation Category", color="Occurrences")
             )
-            fig_issues.update_layout(margin=dict(l=20, r=20, t=20, b=20), yaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_issues, use_container_width=True)
+            fig_heat.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+            st.plotly_chart(fig_heat, use_container_width=True)
         else:
-            st.success("No compliance issue violations flagged yet!")
+            st.info("No violation occurrences data available to display heatmap.")
             
     with col_c2:
         st.markdown("<h5 style='font-weight:600;'>Audit Issues Severity Distribution</h5>", unsafe_allow_html=True)
+        issues_data = DashboardService.get_issue_distribution(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
         sev_counts = issues_data["severity_breakdown"]
         if sum(sev_counts.values()) > 0:
             df_sev = pd.DataFrame([{"Severity": k, "Count": v} for k, v in sev_counts.items() if v > 0])
@@ -511,8 +567,50 @@ def render_dashboard_view(db: Session):
 
     st.markdown("---")
 
-    # Section 3: Recent Activity Table
-    st.markdown("#### 📋 3. Recent Activity")
+    # Section 3: Human Feedback Analytics
+    st.markdown("#### ✍️ 3. Human Feedback Analytics")
+    
+    fb_data = metrics.get("human_feedback_analytics", {})
+    feedback_col1, feedback_col2 = st.columns([1.5, 2.5])
+    
+    with feedback_col1:
+        st.markdown("<h5 style='font-weight:600;'>Feedback KPIs</h5>", unsafe_allow_html=True)
+        st.metric("Total AI Violations", fb_data.get("total_violations", 0))
+        st.metric("Reviewer Agreement Rate", f"{fb_data.get('agreement_rate', 0.0)}%")
+        
+    with feedback_col2:
+        st.markdown("<h5 style='font-weight:600;'>Auditor Review Decisions</h5>", unsafe_allow_html=True)
+        decisions = [
+            {"Decision": "Approved", "Count": fb_data.get("approved", 0)},
+            {"Decision": "Dismissed", "Count": fb_data.get("dismissed", 0)},
+            {"Decision": "False Positives", "Count": fb_data.get("false_positives", 0)},
+            {"Decision": "Pending", "Count": max(0, fb_data.get("total_violations", 0) - (fb_data.get("approved", 0) + fb_data.get("dismissed", 0) + fb_data.get("false_positives", 0)))}
+        ]
+        total_d = sum(d["Count"] for d in decisions)
+        if total_d > 0:
+            df_dec = pd.DataFrame(decisions)
+            fig_dec = px.pie(
+                df_dec,
+                names="Decision",
+                values="Count",
+                hole=0.4,
+                color="Decision",
+                color_discrete_map={
+                    "Approved": "#10b981",
+                    "Dismissed": "#475569",
+                    "False Positives": "#b91c1c",
+                    "Pending": "#f59e0b"
+                }
+            )
+            fig_dec.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+            st.plotly_chart(fig_dec, use_container_width=True)
+        else:
+            st.info("No review decisions registered yet.")
+
+    st.markdown("---")
+
+    # Section 4: Recent Activity Table
+    st.markdown("#### 📋 4. Recent Activity")
     history = DashboardService.get_history(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
     if history:
         # Get top 5 recent processed calls
@@ -581,36 +679,33 @@ def render_history_view(db: Session):
 
     # Load dynamic filter selectors
     from backend.app.services.org_team_advisor_service import OrgTeamAdvisorService
+    from backend.app.schemas.org_team_advisor import OrganizationCreate
+    
     orgs = OrgTeamAdvisorService.list_organizations(db)
-    org_names = ["All Organizations"] + [o.name for o in orgs]
+    fitnova_org = next((o for o in orgs if o.name == "FitNova"), None)
+    if not fitnova_org:
+        org_in = OrganizationCreate(name="FitNova")
+        fitnova_org = OrgTeamAdvisorService.create_organization(db, org_in)
+    f_org_id = fitnova_org.id
     
     st.markdown("<div style='background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-bottom:20px;'>", unsafe_allow_html=True)
     st.markdown("<strong style='color:#475569;'>🔍 Filter Call Logs</strong>", unsafe_allow_html=True)
-    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    teams = OrgTeamAdvisorService.list_teams(db, org_id=f_org_id)
+    team_names = ["All Teams"] + [t.name for t in teams]
     with col_f1:
-        f_org_name = st.selectbox("Organization Filter:", org_names)
-        
-    f_org_id = None
-    team_names = ["All Teams"]
-    if f_org_name != "All Organizations":
-        org_ref = next(o for o in orgs if o.name == f_org_name)
-        f_org_id = org_ref.id
-        teams = OrgTeamAdvisorService.list_teams(db, org_id=org_ref.id)
-        team_names += [t.name for t in teams]
-        
-    with col_f2:
-        f_team_name = st.selectbox("Team Filter:", team_names, disabled=(f_org_id is None))
+        f_team_name = st.selectbox("Team Filter:", team_names)
         
     f_team_id = None
     advisor_names = ["All Advisors"]
     if f_team_name != "All Teams":
-        teams_list = OrgTeamAdvisorService.list_teams(db, org_id=f_org_id)
-        team_ref = next(t for t in teams_list if t.name == f_team_name)
+        team_ref = next(t for t in teams if t.name == f_team_name)
         f_team_id = team_ref.id
         advisors = OrgTeamAdvisorService.list_advisors(db, team_id=team_ref.id)
         advisor_names += [a.name for a in advisors]
         
-    with col_f3:
+    with col_f2:
         f_advisor_name = st.selectbox("Advisor Filter:", advisor_names, disabled=(f_team_id is None))
         
     f_advisor_id = None
@@ -621,7 +716,7 @@ def render_history_view(db: Session):
         
     sources = OrgTeamAdvisorService.list_ingestion_sources(db)
     source_names = ["All Ingestion Sources"] + [s.name for s in sources]
-    with col_f4:
+    with col_f3:
         f_source_name = st.selectbox("Ingestion Source Filter:", source_names)
         
     f_source_id = None

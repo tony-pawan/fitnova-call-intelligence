@@ -132,6 +132,10 @@ def test_dashboard_filters(db):
         source_id=source.id if source else None
     )
     assert metrics["total_calls"] >= 1
+    assert "advisor_leaderboard" in metrics
+    assert "team_performance" in metrics
+    assert "violation_heatmap" in metrics
+    assert "human_feedback_analytics" in metrics
 
     # Cleanup mock calls
     db.delete(call1)
