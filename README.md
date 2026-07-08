@@ -1,177 +1,327 @@
-# FitNova - Sales Call Intelligence System
+# FitNova – AI Sales Call Intelligence System
 
-FitNova is an enterprise conversational intelligence and compliance auditing platform designed for high-performance sales teams. It automates speech transcription, speaker diarization (separating sales advisors vs. prospective clients), Gemini-driven quality evaluations, structured script compliance audits, and advisor feedback appeal workflows.
+FitNova is an AI-powered Sales Call Intelligence platform that automatically processes sales conversations into structured, actionable insights. The system ingests call recordings from multiple sources, transcribes speech, identifies speakers, evaluates sales quality using AI, detects compliance issues, and presents results through interactive dashboards with a human feedback loop.
+
+The application was designed as a modular, source-agnostic pipeline that can easily integrate with new telephony systems, CRM platforms, APIs, or storage providers without changing the core processing logic.
 
 ---
 
-## 🚀 Quick Start
+# Features
 
-Follow these steps to clone, configure, and launch the application:
+## Source-Agnostic Ingestion
+
+FitNova separates data ingestion from processing using a connector-based architecture.
+
+Currently implemented:
+- Manual Upload
+
+Architecture supports:
+- Telephony platforms
+- CRM exports
+- REST APIs
+- Folder watchers
+- Additional connectors without pipeline modifications
+
+Every connector converts incoming data into a standardized `CallInput` object before entering the processing pipeline.
+
+---
+
+## AI Processing Pipeline
+
+Every uploaded call passes through the following stages:
+
+```text
+Audio Recording
+      │
+      ▼
+Speech Transcription
+(Faster Whisper / Gemini)
+      │
+      ▼
+Speaker Diarization
+(Pyannote / Gemini)
+      │
+      ▼
+AI Quality Analysis
+(Gemini Multi-Agent)
+      │
+      ▼
+Issue Detection & Evidence Extraction
+      │
+      ▼
+Storage
+      │
+      ▼
+Dashboard & Human Review
+```
+
+Each stage is isolated and independently replaceable, allowing future improvements without affecting the rest of the pipeline.
+
+---
+
+# System Architecture
+
+```mermaid
+flowchart LR
+
+subgraph Ingestion
+A[Telephony]
+B[CRM Export]
+C[Folder Import]
+D[Manual Upload]
+E[REST API]
+end
+
+A --> F
+B --> F
+C --> F
+D --> F
+E --> F
+
+F[Source-Agnostic Connector Layer]
+
+F --> G[CallInput DTO]
+
+subgraph AI Pipeline
+G --> H[Speech-to-Text]
+H --> I[Speaker Diarization]
+I --> J[AI Quality Analysis]
+end
+
+J --> K[(PostgreSQL)]
+
+J --> L[(Filesystem Storage)]
+
+K --> M[Analytics Dashboard]
+
+L --> M
+
+M --> N[Human Feedback]
+
+N --> K
+```
+
+---
+
+# AI Analysis
+
+The conversation is evaluated using multiple AI agents.
+
+Each call is scored across:
+
+- Needs Discovery
+- Rapport Building
+- Objection Handling
+- Compliance
+- Closing Effectiveness
+
+The system produces:
+
+- Overall Quality Score
+- Category Scores
+- Strengths
+- Weaknesses
+- Coaching Recommendations
+- Compliance Violations
+- Timestamped Evidence
+
+Every detected issue is linked to the exact transcript segment that caused it, making AI decisions transparent and reviewable.
+
+---
+
+# Human Feedback Loop
+
+AI decisions are not treated as final.
+
+Human reviewers can:
+
+- Approve findings
+- Dismiss findings
+- Mark false positives
+- Add reviewer comments
+
+Feedback is stored separately and can later be used to improve prompts or retrain downstream models.
+
+---
+
+# Organization Model
+
+The platform supports scalable organizational hierarchies.
+
+```text
+Organization
+    │
+    ├── Team
+    │      │
+    │      ├── Advisor
+    │      │       │
+    │      │       └── Calls
+```
+
+New organizations, teams, and advisors can be added dynamically without modifying application code.
+
+---
+
+# Storage Design
+
+FitNova separates structured data from large artifacts.
+
+## PostgreSQL
+
+Stores:
+
+- Organizations
+- Teams
+- Advisors
+- Calls
+- Analyses
+- Issue Tags
+- Human Feedback
+- Ingestion Sources
+
+## Filesystem
+
+Stores:
+
+- Raw Audio
+- Transcript JSON
+- Conversation JSON
+- Analysis JSON
+- Processing Timeline
+
+This hybrid storage approach keeps relational queries efficient while preserving complete audit artifacts.
+
+---
+
+# Dashboard
+
+The dashboard surfaces actionable insights rather than raw data.
+
+Visualizations include:
+
+- KPI Summary
+- Quality Score Trends
+- Advisor Leaderboard
+- Team Performance Comparison
+- Radar Chart (Sales Skills)
+- Compliance Heatmap
+- Violation Severity Distribution
+- Human Feedback Analytics
+- Recent Call Activity
+
+Global filters:
+
+- Organization
+- Team
+- Advisor
+- Date
+- Ingestion Source
+
+---
+
+# Technology Stack
+
+Backend
+
+- FastAPI
+- SQLAlchemy 2.0
+- Alembic
+- PostgreSQL
+
+Frontend
+
+- Streamlit
+- Plotly
+
+AI
+
+- Google Gemini
+- Faster Whisper
+- Pyannote.audio
+
+Utilities
+
+- Mutagen
+- Pydantic v2
+
+Testing
+
+- Pytest
+
+---
+
+# Quick Start
+
+## Clone
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/fitnova-sales-call-intelligence.git
-cd fitnova-sales-call-intelligence
+git clone https://github.com/tony-pawan/fitnova-call-intelligence.git
+cd fitnova-call-intelligence
+```
 
-# 2. Set up virtual environment
+## Create Virtual Environment
+
+```bash
 python -m venv .venv
-# On Windows:
-.\.venv\Scripts\activate
-# On macOS/Linux:
+```
+
+Windows
+
+```bash
+.venv\Scripts\activate
+```
+
+Linux/macOS
+
+```bash
 source .venv/bin/activate
+```
 
-# 3. Install dependencies
+## Install Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# 4. Copy environment configuration
+## Configure Environment
+
+```bash
 copy .env.example .env
-# Note: Open .env and configure your GEMINI_API_KEY and Hugging Face PYANNOTE_AUTH_TOKEN
+```
 
-# 5. Initialize the database and seed demo data
+Configure:
+
+- DATABASE_URL
+- GEMINI_API_KEY
+- PYANNOTE_AUTH_TOKEN
+
+---
+
+## Initialize Database
+
+```bash
 python backend/app/database/init_db.py
+```
 
-# 6. Start the FastAPI backend
-uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+---
 
-# 7. Start the Streamlit frontend (in a separate terminal)
+## Run Backend
+
+```bash
+uvicorn backend.app.main:app --reload
+```
+
+---
+
+## Run Frontend
+
+```bash
 streamlit run frontend/Home.py
 ```
 
 ---
 
-## ⚡ System Architecture
-
-The workflow moves sequentially from speech upload to multi-stage pipeline processing, database persistence, and filesystem caching.
-
-```mermaid
-graph TD
-    subgraph Streamlit Frontend
-        A[SaaS Dashboard] -->|Dynamic Filter & Navigation| B[Uploader / Dropdowns]
-        A --> C[Call Scorecard Review]
-        C -->|Auditor appeals decision| D[Human Feedback Loop]
-    end
-
-    subgraph FastAPI Backend
-        E[REST API Routes] -->|GET /dashboard/metrics| F[Dashboard Service]
-        E -->|POST /calls/ingest| G[Upload Service]
-        E -->|POST /calls/appeal| H[Feedback Service]
-    end
-
-    subgraph Relational Database
-        I[(PostgreSQL DB)]
-        I -.->|Org / Team / Advisor| E
-        I -.->|Call / CallAnalysis / IssueTag| E
-    end
-
-    subgraph Pipeline Orchestration
-        J[Background Thread Executor] --> K[CallProcessor]
-        K --> L[Transcription Stage]
-        K --> M[Diarization Stage]
-        K --> N[PII Redaction Stage]
-        K --> O[AI Audit Stage]
-    end
-
-    subgraph AI/ML Models
-        L -->|Fast Failover| L1["Gemini 2.5 Flash"]
-        L -->|Local Fallback| L2["Faster Whisper (base)"]
-        
-        M -->|Fast Failover| M1["Gemini 2.5 Flash"]
-        M -->|Local Fallback| M2["Pyannote.audio"]
-        
-        O -->|Multi-Agent Prompts| O1["Gemini 2.5 Flash"]
-        O -->|Offline Mock| O2["Deterministic Fallback JSON"]
-    end
-
-    subgraph Storage Cache
-        P[(Filesystem Storage)]
-        P -.->|Raw Audio| G
-        P -.->|transcripts JSON| L
-        P -.->|conversations JSON| M
-        P -.->|analysis JSON| O
-    end
-
-    B -->|Trigger async| E
-    G -->|Thread Spawn| J
-    K -->|Read/Write metadata| I
-    K -->|Persist JSON archives| P
-    F -->|Query DB & Read JSON| I
-```
-
----
-
-## 📋 Features
-
-*   **Audio Ingestion**: Drag-and-drop file upload supporting `.wav`, `.mp3`, and `.m4a` files with Mutagen metadata duration parsing.
-*   **Background Pipeline**: Async FastAPI background tasks status tracker mapping states: `Uploaded` ➔ `Queued` ➔ `Processing` ➔ `Completed`/`Failed`.
-*   **Speech-to-Text**: High-speed, local transcription using optimized **Faster Whisper**.
-*   **Speaker Diarization**: Multi-speaker alignment separating `Advisor` and `Customer` turns using **Pyannote.audio**.
-*   **Compliance Audits**: Multi-agent LLM framework (Google Gemini) rating calls and highlighting compliance issue tags.
-*   **Dispute Appeals**: Formal lifecycle workflow for advisors to appeal issue flags, routed to manager review queues.
-*   **Dynamic Visualizations**: Manager leaderboards, performance histograms, and pie charts built with **Plotly Express**.
-
----
-
-## 🛠️ Technology Stack
-
-*   **Backend API**: FastAPI, Uvicorn
-*   **Frontend UI**: Streamlit
-*   **Database & ORM**: PostgreSQL / SQLite, SQLAlchemy 2.0, Alembic migrations
-*   **Audio Processing**: Mutagen
-*   **Machine Learning Models**: Faster Whisper (speech-to-text), Pyannote.audio (speaker diarization)
-*   **LLM Orchestrations**: Google Gemini (1.5-flash)
-*   **Visualizations**: Plotly Express
-*   **Testing**: Pytest
-
----
-
-## 📂 Project Structure
-
-```text
-fitnova/
-├── backend/
-│   ├── alembic/              # Database migration version files
-│   ├── app/                  # Application source package
-│   │   ├── api/              # API router and endpoints
-│   │   ├── core/             # Base settings & logging configs
-│   │   ├── database/         # Session local and initialization seeder scripts
-│   │   ├── models/           # SQLAlchemy ORM models definitions
-│   │   ├── schemas/          # Validation Pydantic schemas
-│   │   ├── services/         # Business layer services (Upload, Dashboard, Appeals)
-│   │   ├── pipeline/         # Orchestrator and background tasks trigger
-│   │   ├── ai/               # AI models (Whisper, Pyannote, Gemini)
-│   │   └── utils/            # Storage and json helpers
-│   └── tests/                # Automated pytest suite (37 tests)
-├── docs/                     # Visual assets folder
-│   └── architecture.mermaid  # System architecture Mermaid flowchart source
-├── frontend/
-│   ├── Home.py               # Streamlit homepage portal
-│   ├── sidebar.py            # Central navigation and authentication switches
-│   └── pages/                # Streamlit multi-page registries
-└── storage/                  # Decoupled filesystem cache (.gitkeep inside)
-    ├── audio/
-    ├── transcripts/
-    ├── conversations/
-    ├── analysis/
-    └── processed/
-```
-
----
-
-## 🔧 Environment Variables
-
-Configure the following parameters in your `.env` file (copied from `.env.example`):
-
-*   `DATABASE_URL`: PostgreSQL connection string (defaults to local config).
-*   `GEMINI_API_KEY`: Google Gemini platform developer API key.
-*   `PYANNOTE_AUTH_TOKEN`: Hugging Face read access token to download Pyannote pipelines.
-*   `WHISPER_MODEL`: Local Whisper size model (`base`, `tiny`, `small`).
-*   `WHISPER_DEVICE`: Local device execution mapping (`cpu` or `cuda`).
-
----
-
-## 🧪 Running Tests
-
-To run the complete automated test suite (36 tests covering DB operations, upload file limits, background pipeline state machines, transcription, diarization, Gemini scorecards, and appeals updates):
+# Running Tests
 
 ```bash
 python -m pytest backend/tests/
@@ -179,37 +329,80 @@ python -m pytest backend/tests/
 
 ---
 
-## 🔍 Real vs. Mocked Components
+# Real vs Mocked Components
 
-### Real Components (Production Mode)
-*   **FastAPI Backend & Streamlit Frontend**: Direct inter-process integration communicating via REST API and database queries.
-*   **Database Persistence**: Structured relational schemas (Organization, Team, Advisor, Call, CallAnalysis, IssueTag) implemented via SQLAlchemy and PostgreSQL.
-*   **Speech-to-Text**: Native transcription via Google Gemini 2.5 Flash with fallback to local **Faster Whisper** execution.
-*   **Speaker Diarization**: Multi-speaker indexing and alignment using Gemini 2.5 Flash with fallback to **Pyannote.audio** diarization.
-*   **Compliance Audits**: Multi-agent compliance audits executing prompt evaluations on Gemini 2.5 Flash.
-*   **Appeals & Appeals Loop**: Live updates, score overrides, and database updates from the auditor decision loop.
-*   **Dashboard Analytics**: Real-time aggregations (Leaderboard, Heatmap, Team Comparison, and Feedback analytics) calculated dynamically from Postgres and filesystem JSON storage.
+## Real
 
-### Mocked Components (Fallback & Offline Mode)
-*   **Gemini Client**: When `GEMINI_API_KEY` is set to `"mock_key_for_development"` or when API quotas are exceeded, the API client automatically falls back to deterministic mock JSON schemas.
-*   **Speaker Diarization**: When Hugging Face authorization tokens are missing or the local `pyannote/speaker-diarization-3.1` model files are missing, the system falls back to a deterministic time-division mock diarization SPEAKER_00 / SPEAKER_01 alternate mapping.
-*   **PII Redaction**: Placeholder stage that logs event timelines without modifying transcript payloads.
+- FastAPI backend
+- Streamlit frontend
+- SQLAlchemy ORM
+- PostgreSQL persistence
+- Gemini analysis
+- Faster Whisper transcription
+- Pyannote diarization
+- Dashboard analytics
+- Human feedback workflow
 
----
+## Mock Fallbacks
 
-## ⚠️ Known Limitations
-*   **NumPy 2.x Conflict with Pyannote**: On some environments, Pyannote/SciPy dependencies trigger a NumPy `module 'numpy' has no attribute 'long'` error. The system handles this gracefully by falling back to mock diarization.
-*   **Rate-Limiting on Free-Tier Keys**: Gemini API keys on the free tier are subject to strict per-minute and per-day request limits. Using a paid tier/developer key resolves all limit-based fallbacks.
-*   **Asynchronous Execution Threading**: In non-testing environments, the call processing runs inside background daemon threads. A complete distributed queue system (like Celery/Redis) is recommended for production scaling.
+When external AI services are unavailable:
 
----
+- Deterministic Gemini responses
+- Mock diarization
+- Mock transcripts
 
-## 🚀 Future Improvements
-1.  **JWT Authentication**: Incorporate active security tokens and role-based permissions validation.
-2.  **Appeal Notifications**: Notify advisors automatically when managers resolve disputes.
-3.  **Real-Time Pipelines**: Transition uploader pipelines to streaming WebSockets for live transcript rendering.
+allow the application to continue functioning for demonstrations and testing.
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License.
+# Design Trade-offs
+
+Several engineering decisions were made to keep the project focused while maintaining extensibility.
+
+- Implemented Manual Upload while designing for multiple ingestion sources.
+- Used asynchronous background processing instead of real-time streaming.
+- Used local filesystem storage instead of cloud object storage.
+- Stored reviewer feedback without implementing automatic model retraining.
+- Chose a modular pipeline so individual AI components can be replaced independently.
+
+---
+
+# Edge Cases Considered
+
+The system handles:
+
+- Mixed English/Hindi conversations
+- Poor audio quality
+- Long recordings
+- Missing AI credentials
+- API failures
+- Duplicate uploads
+- Speaker diarization failures
+- Human disagreement with AI findings
+
+---
+
+# Known Limitations
+
+- Heavy speaker overlap can reduce diarization accuracy.
+- AI quality depends on the underlying language model.
+- Manual Upload is the only fully implemented connector.
+- Filesystem storage should be replaced by cloud object storage for production.
+- A distributed task queue (Celery/RabbitMQ) would be preferable for large-scale deployments.
+
+---
+
+# Future Improvements
+
+- Real-time streaming transcription
+- Cloud object storage (AWS S3 / Azure Blob)
+- JWT Authentication
+- Automatic model retraining from reviewer feedback
+- Support for additional LLM providers
+- Live coaching during calls
+
+---
+
+# License
+
+MIT License
