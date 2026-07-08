@@ -827,185 +827,27 @@ def render_call_details_view(call_id: int, db: Session):
     elif selected_section == "✍️ Human Feedback Loop":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>✍️ Human Feedback Loop Panel</h4>", unsafe_allow_html=True)
         
-        # Sub-tabs for the 4 sections
-        sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs([
-            "📝 Dialogue Corrections",
+        # Sub-tabs for the 3 sections (Dialogue Corrections removed)
+        sub_tab1, sub_tab2, sub_tab3 = st.tabs([
             "⚠️ Violations Review",
             "⚙️ Score Override",
             "🔄 AI Re-Analysis"
         ])
 
         with sub_tab1:
-            st.markdown("##### 1. Edit Speaker Dialogues & Transcript Text")
-            conv = details["conversation"]
-            if not conv or "segments" not in conv:
-                st.warning("Conversation text segments unavailable.")
-            else:
-                with st.expander("📝 Correct Transcript Dialogues & Speaker Labels", expanded=True):
-                    st.info("Edit text areas directly or map speaker identities. Click Save to record corrections version.")
-                    st.markdown("### Conversation")
-                    
-                    corrections = []
-                    speaker_updates = []
-                    
-                    # To prevent lag, display maximum of 50 segments
-                    seg_limit = min(50, len(conv["segments"]))
-                    for i in range(seg_limit):
-                        seg = conv["segments"][i]
-                        
-                        # Dropdown for speaker
-                        opts = ["Advisor", "Customer", "Unknown"]
-                        def_idx = opts.index(seg["speaker"]) if seg["speaker"] in opts else 2
-                        spk_val = st.selectbox(f"Speaker #{i+1}", opts, index=def_idx, key=f"spk_ed_{call_id}_{i}", label_visibility="collapsed")
-                        
-                        # Text area for message
-                        txt_val = st.text_area(f"Text #{i+1}", value=seg["text"], key=f"txt_ed_{call_id}_{i}", label_visibility="collapsed", height=68)
-                        
-                        if spk_val != seg["speaker"]:
-                            speaker_updates.append({"index": i, "speaker": spk_val})
-                        if txt_val != seg["text"]:
-                            corrections.append({"index": i, "text": txt_val})
-                            
-                        st.markdown("<hr style='margin: 8px 0; border-top: 1px dashed #cbd5e1;'>", unsafe_allow_html=True)
-                    
-                    if st.button("Save Dialogue Corrections", type="primary", use_container_width=True):
-                        if corrections or speaker_updates:
-                            if corrections:
-                                FeedbackService.correct_transcript(db, call_id, corrections)
-                            if speaker_updates:
-                                FeedbackService.correct_speakers(db, call_id, speaker_updates)
-                            st.success("Dialogue corrections saved successfully! Revisions created.")
-                            st.rerun()
-                        else:
-                            st.info("No modifications detected.")
-
-        with sub_tab2:
-            st.markdown("##### 2. Audit Compliance Violations Review")
+            st.markdown("##### 1. Audit Compliance Violations Review")
             from backend.app.models.analysis import CallAnalysis
             db_analysis = db.query(CallAnalysis).filter(CallAnalysis.call_id == call_id).first()
             
             if db_analysis and db_analysis.issue_tags:
-                # Two-column layout
-                col_left, col_right = st.columns([1, 2])
-                
-                with col_left:
-                    st.markdown("###### Detected Violations")
-                    violation_labels = []
-                    violation_map = {}
-                    for tag in db_analysis.issue_tags:
-                        sev_icon = "🔴" if tag.severity.value == "Critical" else ("🟠" if tag.severity.value == "High" else ("🟡" if tag.severity.value == "Medium" else "🟢"))
-                        conf_val = int(tag.confidence) if getattr(tag, "confidence", None) is not None else 85
-                        label = f"{sev_icon} {tag.tag} ({conf_val}%)"
-                        violation_labels.append(label)
-                        violation_map[label] = tag
-                        
-                    # Radio list to select violation
-                    selected_label = st.radio(
-                        "Select violation:",
-                        options=violation_labels,
-                        key=f"sel_violation_{call_id}",
-                        label_visibility="collapsed"
-                    )
-                    selected_tag = violation_map[selected_label]
-                    
-                with col_right:
-                    # Section 1 - AI Decision
-                    st.markdown("###### Section 1 — AI Decision")
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        st.metric("Severity", selected_tag.severity.value)
-                    with c2:
-                        conf_pct = int(selected_tag.confidence) if getattr(selected_tag, "confidence", None) is not None else 85
-                        st.metric("AI Confidence", f"{conf_pct}%")
-                    with c3:
-                        st.metric("Status", selected_tag.review_status)
-                    with c4:
-                        st.metric("Detection", "AI Flagged")
-                        
-                    st.markdown("---")
-                    
-                    # Section 2 - Why AI Flagged This
-                    st.markdown("###### Section 2 — Why AI Flagged This")
-                    st.markdown(f"**Reason:**\n{selected_tag.reason}")
-                    
-                    st.markdown("---")
-                    
-                    # Section 3 - Transcript Evidence
-                    st.markdown("###### Section 3 — Transcript Evidence")
-                    import json
-                    evidence = []
-                    if getattr(selected_tag, "evidence_segments", None):
-                        try:
-                            evidence = json.loads(selected_tag.evidence_segments)
-                        except:
-                            pass
-                            
-                    if evidence:
-                        for seg in evidence:
-                            raw_start = seg.get("start_time", 0.0)
-                            m_sec = f"{int(raw_start // 60):02d}:{int(raw_start % 60):02d}"
-                            
-                            st.markdown(
-                                f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
-                                f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> "
-                                f"<strong style='color: #1e293b;'>{seg.get('speaker', 'Speaker')}:</strong> {seg.get('transcript_text', '')}"
-                                f"</div>", unsafe_allow_html=True
-                            )
-                    else:
-                        m_sec = f"{int(selected_tag.timestamp // 60):02d}:{int(selected_tag.timestamp % 60):02d}"
-                        st.markdown(
-                            f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
-                            f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> {selected_tag.quote}"
-                            f"</div>", unsafe_allow_html=True
-                        )
-                        
-                    st.markdown("---")
-                    
-                    # Section 4 - Reviewer Decision
-                    st.markdown("###### Section 4 — Reviewer Decision")
-                    with st.form(f"form_single_violation_review_{selected_tag.id}"):
-                        col_dec1, col_dec2 = st.columns(2)
-                        with col_dec1:
-                            dec_opts = ["Approve", "Dismiss", "False Positive", "Needs Investigation"]
-                            cur_dec = selected_tag.review_status
-                            dec_idx = dec_opts.index(cur_dec) if cur_dec in dec_opts else 0
-                            decision_val = st.selectbox("Decision", dec_opts, index=dec_idx)
-                        with col_dec2:
-                            sev_opts = ["Critical", "High", "Medium", "Low"]
-                            cur_sev = selected_tag.severity.value
-                            sev_idx = sev_opts.index(cur_sev) if cur_sev in sev_opts else 2
-                            severity_val = st.selectbox("Severity Override", sev_opts, index=sev_idx)
-                            
-                        comment_val = st.text_area("Reviewer Comment", value=getattr(selected_tag, "reviewer_comments", "") or "")
-                        
-                        # Section 6 - Save Review
-                        submitted = st.form_submit_button("Save Review", use_container_width=True)
-                        if submitted:
-                            FeedbackService.review_issue(
-                                db=db,
-                                issue_id=selected_tag.id,
-                                review_status=decision_val,
-                                reviewer_comments=comment_val,
-                                severity=severity_val
-                            )
-                            st.success(f"Successfully saved review for {selected_tag.tag}!")
-                            st.rerun()
-                            
-                    st.markdown("---")
-                    
-                    # Section 5 - AI Recommendation
-                    st.markdown("###### Section 5 — AI Coaching Suggestions")
-                    st.info(getattr(selected_tag, 'recommendation', 'N/A') or 'N/A')
-                    
-                # Reviewer Summary
-                st.markdown("---")
+                # Reviewer Summary at the top
                 st.markdown("##### Reviewer Summary")
                 app_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "Approve")
                 dsm_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "Dismiss")
                 fp_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "False Positive")
                 pending_c = sum(1 for t in db_analysis.issue_tags if t.review_status in ["Pending", "Needs Human Review"])
                 
-                sc1, sc2, sc3, sc4 = st.columns(4)
+                sc1, sc2, sc3, sc4, sc5 = st.columns([1, 1, 1, 1, 2.5])
                 with sc1:
                     st.metric("Approved", app_c)
                 with sc2:
@@ -1013,12 +855,160 @@ def render_call_details_view(call_id: int, db: Session):
                 with sc3:
                     st.metric("False Positives", fp_c)
                 with sc4:
-                    st.metric("Pending Reviews", pending_c)
+                    st.metric("Pending", pending_c)
+                with sc5:
+                    if st.button("✅ Approve All Pending Gaps", type="primary", use_container_width=True):
+                        for tag in db_analysis.issue_tags:
+                            if tag.review_status != "Approve":
+                                FeedbackService.review_issue(
+                                    db=db,
+                                    issue_id=tag.id,
+                                    review_status="Approve",
+                                    reviewer_comments="Bulk approved by auditor.",
+                                    severity=tag.severity.value
+                                )
+                        st.success("Successfully bulk approved all violations!")
+                        st.rerun()
+                
+                st.markdown("---")
+                
+                # Column width slider to allow custom sizing
+                left_col_ratio = st.slider("Left Panel Width Ratio:", min_value=1.0, max_value=4.0, value=1.8, step=0.1)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Separate violations: Approved vs. Unapproved Gaps
+                unapproved_tags = [t for t in db_analysis.issue_tags if t.review_status != "Approve"]
+                approved_tags = [t for t in db_analysis.issue_tags if t.review_status == "Approve"]
+                
+                # Two-column layout
+                col_left, col_right = st.columns([left_col_ratio, 4.0])
+                
+                with col_left:
+                    st.markdown("###### Detected Violations")
+                    group_selection = st.radio("Category Group:", ["Pending & Active Reviews", "Approved Violations"], horizontal=True, key=f"feed_group_{call_id}")
+                    
+                    if group_selection == "Pending & Active Reviews":
+                        target_tags = unapproved_tags
+                    else:
+                        target_tags = approved_tags
+                        
+                    if not target_tags:
+                        st.info("No compliance violations in this section.")
+                        selected_tag = None
+                    else:
+                        violation_labels = []
+                        violation_map = {}
+                        for tag in target_tags:
+                            sev_icon = "🔴" if tag.severity.value == "Critical" else ("🟠" if tag.severity.value == "High" else ("🟡" if tag.severity.value == "Medium" else "🟢"))
+                            conf_val = int(tag.confidence) if getattr(tag, "confidence", None) is not None else 85
+                            label = f"{sev_icon} {tag.tag} ({conf_val}%)"
+                            violation_labels.append(label)
+                            violation_map[label] = tag
+                            
+                        selected_label = st.radio(
+                            "Select violation to audit:",
+                            options=violation_labels,
+                            key=f"sel_violation_{call_id}",
+                            label_visibility="collapsed"
+                        )
+                        selected_tag = violation_map[selected_label]
+                    
+                with col_right:
+                    if not selected_tag:
+                        st.info("Select a violation to view details.")
+                    else:
+                        # Section 1 - AI Decision
+                        st.markdown("###### Section 1 — AI Decision")
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.metric("Severity", selected_tag.severity.value)
+                        with c2:
+                            conf_pct = int(selected_tag.confidence) if getattr(selected_tag, "confidence", None) is not None else 85
+                            st.metric("AI Confidence", f"{conf_pct}%")
+                        with c3:
+                            st.metric("Status", selected_tag.review_status)
+                        with c4:
+                            st.metric("Detection", "AI Flagged")
+                            
+                        st.markdown("---")
+                        
+                        # Section 2 - Why AI Flagged This
+                        st.markdown("###### Section 2 — Why AI Flagged This")
+                        st.markdown(f"**Reason:**\n{selected_tag.reason}")
+                        
+                        st.markdown("---")
+                        
+                        # Section 3 - Transcript Evidence
+                        st.markdown("###### Section 3 — Transcript Evidence")
+                        import json
+                        evidence = []
+                        if getattr(selected_tag, "evidence_segments", None):
+                            try:
+                                evidence = json.loads(selected_tag.evidence_segments)
+                            except:
+                                pass
+                                
+                        if evidence:
+                            for seg in evidence:
+                                raw_start = seg.get("start_time", 0.0)
+                                m_sec = f"{int(raw_start // 60):02d}:{int(raw_start % 60):02d}"
+                                
+                                st.markdown(
+                                    f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
+                                    f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> "
+                                    f"<strong style='color: #1e293b;'>{seg.get('speaker', 'Speaker')}:</strong> {seg.get('transcript_text', '')}"
+                                    f"</div>", unsafe_allow_html=True
+                                )
+                        else:
+                            m_sec = f"{int(selected_tag.timestamp // 60):02d}:{int(selected_tag.timestamp % 60):02d}"
+                            st.markdown(
+                                f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
+                                f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> {selected_tag.quote}"
+                                f"</div>", unsafe_allow_html=True
+                            )
+                            
+                        st.markdown("---")
+                        
+                        # Section 4 - Reviewer Decision
+                        st.markdown("###### Section 4 — Reviewer Decision")
+                        with st.form(f"form_single_violation_review_{selected_tag.id}"):
+                            col_dec1, col_dec2 = st.columns(2)
+                            with col_dec1:
+                                dec_opts = ["Approve", "Dismiss", "False Positive", "Needs Investigation"]
+                                cur_dec = selected_tag.review_status
+                                dec_idx = dec_opts.index(cur_dec) if cur_dec in dec_opts else 0
+                                decision_val = st.selectbox("Decision", dec_opts, index=dec_idx)
+                            with col_dec2:
+                                sev_opts = ["Critical", "High", "Medium", "Low"]
+                                cur_sev = selected_tag.severity.value
+                                sev_idx = sev_opts.index(cur_sev) if cur_sev in sev_opts else 2
+                                severity_val = st.selectbox("Severity Override", sev_opts, index=sev_idx)
+                                
+                            comment_val = st.text_area("Reviewer Comment", value=getattr(selected_tag, "reviewer_comments", "") or "")
+                            
+                            # Section 6 - Save Review
+                            submitted = st.form_submit_button("Save Review", use_container_width=True)
+                            if submitted:
+                                FeedbackService.review_issue(
+                                    db=db,
+                                    issue_id=selected_tag.id,
+                                    review_status=decision_val,
+                                    reviewer_comments=comment_val,
+                                    severity=severity_val
+                                )
+                                st.success(f"Successfully saved review for {selected_tag.tag}!")
+                                st.rerun()
+                                
+                        st.markdown("---")
+                        
+                        # Section 5 - AI Recommendation
+                        st.markdown("###### Section 5 — AI Coaching Suggestions")
+                        st.info(getattr(selected_tag, 'recommendation', 'N/A') or 'N/A')
             else:
                 st.success("No compliance issue violations to review for this call.")
 
-        with sub_tab3:
-            st.markdown("##### 3. Quality Score Manual Override")
+        with sub_tab2:
+            st.markdown("##### 2. Quality Score Manual Override")
             current_sc = int(round(details["analysis"]["overall_score"])) if details["analysis"] else 80
             
             # Number input with up/down spinner arrows (no horizontal scrollbar)
@@ -1040,9 +1030,9 @@ def render_call_details_view(call_id: int, db: Session):
                     st.success("Manual override scorecard score saved successfully!")
                     st.rerun()
 
-        with sub_tab4:
-            st.markdown("##### 4. Trigger Gemini AI Re-Evaluation")
-            st.info("Re-run Needs Discovery checklist, Objection handling, and Compliance scorecards on the human-corrected dialogue transcripts.")
+        with sub_tab3:
+            st.markdown("##### 3. Trigger Gemini AI Re-Evaluation")
+            st.info("Re-run Needs Discovery checklist, Objection handling, and Compliance scorecards on the human dialogue transcripts.")
             has_completed_review = any(t.review_status != "Pending" for t in db_analysis.issue_tags) if db_analysis and db_analysis.issue_tags else False
             
             if st.button("Run AI Re-analysis", type="primary", use_container_width=True, disabled=not has_completed_review):
