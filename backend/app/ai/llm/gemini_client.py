@@ -15,6 +15,8 @@ class GeminiClient:
         """
         if not cls._configured:
             api_key = settings.GEMINI_API_KEY
+            if api_key:
+                api_key = api_key.strip('"\'')
             if api_key and api_key != "mock_key_for_development":
                 logger.info("Initializing Google Generative AI with configured API Key")
                 genai.configure(api_key=api_key)
@@ -30,6 +32,8 @@ class GeminiClient:
         """
         self.configure()
         api_key = settings.GEMINI_API_KEY
+        if api_key:
+            api_key = api_key.strip('"\'')
 
         # Fallback Mode for Tests and Development
         if not api_key or api_key == "mock_key_for_development":
