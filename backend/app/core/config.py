@@ -73,7 +73,7 @@ class Settings(BaseSettings):
         description="Sampling temperature for LLM responses (creativity vs. deterministic)."
     )
     MAX_OUTPUT_TOKENS: int = Field(
-        default=1024,
+        default=4096,
         description="Maximum tokens allowed in generative AI response."
     )
     ANALYSIS_FOLDER: str = Field(
