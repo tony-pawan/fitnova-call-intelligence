@@ -43,34 +43,59 @@ streamlit run frontend/Home.py
 
 The workflow moves sequentially from speech upload to multi-stage pipeline processing, database persistence, and filesystem caching.
 
-```text
-                                 [ Web Client Dashboard ]
-                                    (Streamlit Front)
-                                           │
-                                           ▼ (REST API HTTP)
-                                     [ FastAPI App ]
-                                           │
-                         ┌─────────────────┴─────────────────┐
-                         ▼                                   ▼
-                 [ PostgreSQL DB ]                 [ BackgroundTasks ]
-              (Metadata & Relations)            (Pipeline Orchestration)
-                                                             │
-                                                             ▼
-                                                      [ CallProcessor ]
-                                                             │
-       ┌─────────────────────┬───────────────────────┼───────────────────┐
-       ▼                     ▼                       ▼                   ▼
-[ Transcription ]     [ Diarization ]         [ PII Redaction ]   [ AI Analytics ]
-(Whisper Speech)      (Advisor/Customer)      (Sensitive Masking) (Gemini Multi-Agent)
-       │                     │                       │                   │
-       └─────────────────────┼───────────────────────┴───────────────────┘
-                             ▼
-                 [ Storage Manager (Disk) ]
-             (transcript, conversation, analysis,
-               and timeline JSON files)
-```
+```mermaid
+graph TD
+    subgraph Streamlit Frontend
+        A[SaaS Dashboard] -->|Dynamic Filter & Navigation| B[Uploader / Dropdowns]
+        A --> C[Call Scorecard Review]
+        C -->|Auditor appeals decision| D[Human Feedback Loop]
+    end
 
-For a detailed visual description, see the [Architecture Flowchart](docs/architecture.png).
+    subgraph FastAPI Backend
+        E[REST API Routes] -->|GET /dashboard/metrics| F[Dashboard Service]
+        E -->|POST /calls/ingest| G[Upload Service]
+        E -->|POST /calls/appeal| H[Feedback Service]
+    end
+
+    subgraph Relational Database
+        I[(PostgreSQL DB)]
+        I -.->|Org / Team / Advisor| E
+        I -.->|Call / CallAnalysis / IssueTag| E
+    end
+
+    subgraph Pipeline Orchestration
+        J[Background Thread Executor] --> K[CallProcessor]
+        K --> L[Transcription Stage]
+        K --> M[Diarization Stage]
+        K --> N[PII Redaction Stage]
+        K --> O[AI Audit Stage]
+    end
+
+    subgraph AI/ML Models
+        L -->|Fast Failover| L1["Gemini 2.5 Flash"]
+        L -->|Local Fallback| L2["Faster Whisper (base)"]
+        
+        M -->|Fast Failover| M1["Gemini 2.5 Flash"]
+        M -->|Local Fallback| M2["Pyannote.audio"]
+        
+        O -->|Multi-Agent Prompts| O1["Gemini 2.5 Flash"]
+        O -->|Offline Mock| O2["Deterministic Fallback JSON"]
+    end
+
+    subgraph Storage Cache
+        P[(Filesystem Storage)]
+        P -.->|Raw Audio| G
+        P -.->|transcripts JSON| L
+        P -.->|conversations JSON| M
+        P -.->|analysis JSON| O
+    end
+
+    B -->|Trigger async| E
+    G -->|Thread Spawn| J
+    K -->|Read/Write metadata| I
+    K -->|Persist JSON archives| P
+    F -->|Query DB & Read JSON| I
+```
 
 ---
 
@@ -117,7 +142,7 @@ fitnova/
 │   │   └── utils/            # Storage and json helpers
 │   └── tests/                # Automated pytest suite (37 tests)
 ├── docs/                     # Visual assets folder
-│   └── architecture.png      # System architecture flow diagram
+│   └── architecture.mermaid  # System architecture Mermaid flowchart source
 ├── frontend/
 │   ├── Home.py               # Streamlit homepage portal
 │   ├── sidebar.py            # Central navigation and authentication switches
@@ -146,7 +171,7 @@ Configure the following parameters in your `.env` file (copied from `.env.exampl
 
 ## 🧪 Running Tests
 
-To run the complete automated test suite (37 tests covering DB operations, upload file limits, background pipeline state machines, transcription, diarization, Gemini scorecards, and appeals updates):
+To run the complete automated test suite (36 tests covering DB operations, upload file limits, background pipeline state machines, transcription, diarization, Gemini scorecards, and appeals updates):
 
 ```bash
 python -m pytest backend/tests/
@@ -154,14 +179,28 @@ python -m pytest backend/tests/
 
 ---
 
-## 📷 Screenshots
-*Expects real application screenshots demonstrating manager dashboards, call scorecards, and dispute appeals tabs.*
+## 🔍 Real vs. Mocked Components
 
-*   **Dashboard Overview**: `docs/dashboard.png` (Placeholder)
-*   **Upload Form**: `docs/upload.png` (Placeholder)
-*   **AI Analysis**: `docs/analysis.png` (Placeholder)
-*   **Appeals Review**: `docs/manager_dashboard.png` (Placeholder)
-*   **Pipeline Status**: `docs/pipeline.png` (Placeholder)
+### Real Components (Production Mode)
+*   **FastAPI Backend & Streamlit Frontend**: Direct inter-process integration communicating via REST API and database queries.
+*   **Database Persistence**: Structured relational schemas (Organization, Team, Advisor, Call, CallAnalysis, IssueTag) implemented via SQLAlchemy and PostgreSQL.
+*   **Speech-to-Text**: Native transcription via Google Gemini 2.5 Flash with fallback to local **Faster Whisper** execution.
+*   **Speaker Diarization**: Multi-speaker indexing and alignment using Gemini 2.5 Flash with fallback to **Pyannote.audio** diarization.
+*   **Compliance Audits**: Multi-agent compliance audits executing prompt evaluations on Gemini 2.5 Flash.
+*   **Appeals & Appeals Loop**: Live updates, score overrides, and database updates from the auditor decision loop.
+*   **Dashboard Analytics**: Real-time aggregations (Leaderboard, Heatmap, Team Comparison, and Feedback analytics) calculated dynamically from Postgres and filesystem JSON storage.
+
+### Mocked Components (Fallback & Offline Mode)
+*   **Gemini Client**: When `GEMINI_API_KEY` is set to `"mock_key_for_development"` or when API quotas are exceeded, the API client automatically falls back to deterministic mock JSON schemas.
+*   **Speaker Diarization**: When Hugging Face authorization tokens are missing or the local `pyannote/speaker-diarization-3.1` model files are missing, the system falls back to a deterministic time-division mock diarization SPEAKER_00 / SPEAKER_01 alternate mapping.
+*   **PII Redaction**: Placeholder stage that logs event timelines without modifying transcript payloads.
+
+---
+
+## ⚠️ Known Limitations
+*   **NumPy 2.x Conflict with Pyannote**: On some environments, Pyannote/SciPy dependencies trigger a NumPy `module 'numpy' has no attribute 'long'` error. The system handles this gracefully by falling back to mock diarization.
+*   **Rate-Limiting on Free-Tier Keys**: Gemini API keys on the free tier are subject to strict per-minute and per-day request limits. Using a paid tier/developer key resolves all limit-based fallbacks.
+*   **Asynchronous Execution Threading**: In non-testing environments, the call processing runs inside background daemon threads. A complete distributed queue system (like Celery/Redis) is recommended for production scaling.
 
 ---
 
