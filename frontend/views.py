@@ -1,5 +1,6 @@
 import os
 import requests
+# pyrefly: ignore [missing-import]
 import streamlit as st
 import pandas as pd
 import plotly.express as px  # pyrefly: ignore [missing-import]
@@ -121,12 +122,85 @@ def render_home_view(db: Session):
     # 1. Manual Upload View
     if active_src == "upload":
         st.markdown("<h5 style='color:#4f46e5;'>Direct Manual Call Upload</h5>", unsafe_allow_html=True)
+        # Load Dynamic hierarchy dropdowns
+        from backend.app.services.org_team_advisor_service import OrgTeamAdvisorService
+        from backend.app.schemas.org_team_advisor import OrganizationCreate, TeamCreate, AdvisorCreate
+        
+        # 1. Resolve Organization: FitNova
+        orgs = OrgTeamAdvisorService.list_organizations(db)
+        fitnova_org = next((o for o in orgs if o.name == "FitNova"), None)
+        if not fitnova_org:
+            org_in = OrganizationCreate(name="FitNova")
+            fitnova_org = OrgTeamAdvisorService.create_organization(db, org_in)
+        selected_org_id = fitnova_org.id
+        
+        # 2. Team dropdown with dynamic creation option
+        teams = OrgTeamAdvisorService.list_teams(db, org_id=selected_org_id)
+        team_names = ["Select Team...", "➕ Add New Team..."] + [t.name for t in teams]
+        selected_team_name = st.selectbox("Team:", team_names)
+        
+        selected_team_id = None
+        if selected_team_name == "➕ Add New Team...":
+            new_team_name = st.text_input("Enter New Team Name:", key="new_team_name_input")
+            if st.button("Create Team", type="secondary"):
+                if new_team_name.strip():
+                    team_in = TeamCreate(name=new_team_name.strip(), organization_id=selected_org_id)
+                    new_team = OrgTeamAdvisorService.create_team(db, team_in)
+                    st.success(f"Team '{new_team.name}' created successfully!")
+                    st.rerun()
+                else:
+                    st.warning("Please enter a team name.")
+        elif selected_team_name != "Select Team...":
+            team_obj = next((t for t in teams if t.name == selected_team_name), None)
+            if team_obj:
+                selected_team_id = team_obj.id
+                
+        # 3. Advisor dropdown with dynamic creation option
+        selected_advisor_id = None
+        if selected_team_id is not None:
+            advisors = OrgTeamAdvisorService.list_advisors(db, team_id=selected_team_id)
+            advisor_names = ["Select Advisor...", "➕ Add New Advisor..."] + [a.name for a in advisors]
+            selected_advisor_name = st.selectbox("Advisor:", advisor_names)
+            
+            if selected_advisor_name == "➕ Add New Advisor...":
+                new_advisor_name = st.text_input("Enter New Advisor Name:", key="new_adv_name_input")
+                new_advisor_code = st.text_input("Enter Employee Code (e.g. ADV123):", key="new_adv_code_input")
+                if st.button("Create Advisor", type="secondary"):
+                    if new_advisor_name.strip() and new_advisor_code.strip():
+                        adv_in = AdvisorCreate(
+                            name=new_advisor_name.strip(),
+                            employee_code=new_advisor_code.strip(),
+                            team_id=selected_team_id
+                        )
+                        new_adv = OrgTeamAdvisorService.create_advisor(db, adv_in)
+                        st.success(f"Advisor '{new_adv.name}' created successfully!")
+                        st.rerun()
+                    else:
+                        st.warning("Please fill in both name and employee code.")
+            elif selected_advisor_name != "Select Advisor...":
+                adv_obj = next((a for a in advisors if a.name == selected_advisor_name), None)
+                if adv_obj:
+                    selected_advisor_id = adv_obj.id
+        else:
+            st.selectbox("Advisor:", ["Select Advisor..."], disabled=True)
+            
+        # 4. Resolve Ingestion Source: Manual Upload
+        sources = OrgTeamAdvisorService.list_ingestion_sources(db)
+        upload_source = next((s for s in sources if s.name in ["Upload", "Manual Upload"]), None)
+        selected_source_id = upload_source.id if upload_source else None
+
         uploaded_file = st.file_uploader("Choose a WAV, MP3, or M4A call recording file", type=["wav", "mp3", "m4a", "aac"])
         if st.button("Process Uploaded Call", type="primary", use_container_width=True, disabled=not uploaded_file):
             with st.spinner("Processing manually uploaded call..."):
                 try:
                     files = {"api_audio_file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    data = {"source_type": "Upload"}
+                    data = {
+                        "source_type": "Upload",
+                        "organization_id": selected_org_id if selected_org_id else "",
+                        "team_id": selected_team_id if selected_team_id else "",
+                        "advisor_id": selected_advisor_id if selected_advisor_id else "",
+                        "source_id": selected_source_id if selected_source_id else ""
+                    }
                     response = requests.post(f"{BACKEND_URL}/calls/ingest", files=files, data=data, timeout=60)
                     if response.status_code == 200:
                         res = response.json()
@@ -281,37 +355,77 @@ def render_dashboard_view(db: Session):
     """
     Renders the redesigned, assignment-focused operational dashboard.
     """
-    metrics = DashboardService.get_dashboard_metrics(db)
+    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">📈 Conversational Intelligence Dashboard</h2>', unsafe_allow_html=True)
+    
+    # Load dynamic filter selectors
+    from backend.app.services.org_team_advisor_service import OrgTeamAdvisorService
+    orgs = OrgTeamAdvisorService.list_organizations(db)
+    org_names = ["All Organizations"] + [o.name for o in orgs]
+    
+    st.markdown("<div style='background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-bottom:20px;'>", unsafe_allow_html=True)
+    st.markdown("<strong style='color:#475569;'>🔍 Filter Dashboard Metrics</strong>", unsafe_allow_html=True)
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    with col_f1:
+        f_org_name = st.selectbox("Organization Filter:", org_names)
+        
+    f_org_id = None
+    team_names = ["All Teams"]
+    if f_org_name != "All Organizations":
+        org_ref = next(o for o in orgs if o.name == f_org_name)
+        f_org_id = org_ref.id
+        teams = OrgTeamAdvisorService.list_teams(db, org_id=org_ref.id)
+        team_names += [t.name for t in teams]
+        
+    with col_f2:
+        f_team_name = st.selectbox("Team Filter:", team_names, disabled=(f_org_id is None))
+        
+    f_team_id = None
+    advisor_names = ["All Advisors"]
+    if f_team_name != "All Teams":
+        teams_list = OrgTeamAdvisorService.list_teams(db, org_id=f_org_id)
+        team_ref = next(t for t in teams_list if t.name == f_team_name)
+        f_team_id = team_ref.id
+        advisors = OrgTeamAdvisorService.list_advisors(db, team_id=team_ref.id)
+        advisor_names += [a.name for a in advisors]
+        
+    with col_f3:
+        f_advisor_name = st.selectbox("Advisor Filter:", advisor_names, disabled=(f_team_id is None))
+        
+    f_advisor_id = None
+    if f_advisor_name != "All Advisors":
+        advisors_list = OrgTeamAdvisorService.list_advisors(db, team_id=f_team_id)
+        adv_ref = next(a for a in advisors_list if a.name == f_advisor_name)
+        f_advisor_id = adv_ref.id
+        
+    sources = OrgTeamAdvisorService.list_ingestion_sources(db)
+    source_names = ["All Ingestion Sources"] + [s.name for s in sources]
+    with col_f4:
+        f_source_name = st.selectbox("Ingestion Source Filter:", source_names)
+        
+    f_source_id = None
+    if f_source_name != "All Ingestion Sources":
+        src_ref = next(s for s in sources if s.name == f_source_name)
+        f_source_id = src_ref.id
+        
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Load filtered metrics
+    metrics = DashboardService.get_dashboard_metrics(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
 
     if metrics["total_calls"] == 0:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.info("💡 **No calls have been analyzed yet.** Go to the Home view and ingest your first recording to populate analytics.")
+        st.info("💡 **No calls match the selected filters or have been analyzed yet.** Adjust filters or go to the Home view to ingest recordings.")
         return
 
-    st.markdown('<h2 style="font-family:\'Outfit\',sans-serif;color:#1e293b;">📈 Conversational Intelligence Dashboard</h2>', unsafe_allow_html=True)
     st.markdown("---")
 
-    # Section 1: Pipeline Overview
-    st.markdown("#### ⚙️ 1. Pipeline Overview")
+    # Section 1: Sales Performance
+    st.markdown("#### 🏆 1. Sales Performance")
     
-    # KPI metrics cards
-    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
-    with kpi_col1:
-        st.metric(label="Total Calls Processed", value=metrics["total_calls"])
-    with kpi_col2:
-        st.metric(label="Average AI Quality Score", value=f"{metrics['average_score']}/100")
-    with kpi_col3:
-        st.metric(label="Average Processing Time", value=f"{metrics['average_processing_time']}s")
-    with kpi_col4:
-        st.metric(label="Calls Requiring Review", value=metrics["calls_requiring_review"])
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Row 1: Quality Trend & Stage durations
     col_t1, col_t2 = st.columns(2)
     with col_t1:
         st.markdown("<h5 style='font-weight:600;'>AI Quality Score Trend</h5>", unsafe_allow_html=True)
-        trends = DashboardService.get_score_trends(db)
+        trends = DashboardService.get_score_trends(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
         if trends:
             df_trends = pd.DataFrame(trends)
             fig_trend = px.line(
@@ -329,56 +443,6 @@ def render_dashboard_view(db: Session):
             st.info("Not enough data to calculate timeline trends.")
             
     with col_t2:
-        st.markdown("<h5 style='font-weight:600;'>Pipeline Stage Average Performance (s)</h5>", unsafe_allow_html=True)
-        durations = metrics.get("stage_durations", {})
-        if durations:
-            df_dur = pd.DataFrame([{"Stage": k, "Duration (s)": v} for k, v in durations.items()])
-            fig_dur = px.bar(
-                df_dur,
-                x="Duration (s)",
-                y="Stage",
-                orientation="h",
-                color="Stage",
-                color_discrete_sequence=px.colors.qualitative.Bold
-            )
-            fig_dur.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-            st.plotly_chart(fig_dur, use_container_width=True)
-        else:
-            st.info("No pipeline telemetry data available.")
-
-    # Row 2: Ingestion Sources & Health Table
-    col_i1, col_i2 = st.columns(2)
-    with col_i1:
-        st.markdown("<h5 style='font-weight:600;'>Calls by Ingestion Source</h5>", unsafe_allow_html=True)
-        src_data = metrics["calls_by_source"]
-        clean_src = {}
-        for k, v in src_data.items():
-            key = k
-            if k == "Folder": key = "Folder Watcher"
-            elif k == "CRM": key = "CRM Import"
-            elif k in ["Telephony", "Dialer"]: key = "Telephony/Dialer"
-            clean_src[key] = clean_src.get(key, 0) + v
-            
-        df_src = pd.DataFrame([{"Source": k, "Volume": v} for k, v in clean_src.items()])
-        fig_src = px.pie(df_src, names="Source", values="Volume", hole=0.3, color_discrete_sequence=px.colors.qualitative.Safe)
-        fig_src.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-        st.plotly_chart(fig_src, use_container_width=True)
-        
-    with col_i2:
-        st.markdown("<h5 style='font-weight:600;'>Connector Operational Status</h5>", unsafe_allow_html=True)
-        health_data = metrics["source_health"]
-        health_rows = []
-        for k, v in health_data.items():
-            status_symbol = "🟢 Active" if v == "Active" else ("🔴 Error" if v == "Error" else "⚪ Inactive")
-            health_rows.append({"Ingestion Connector Source": k, "Operational Status": status_symbol})
-        st.dataframe(pd.DataFrame(health_rows), use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-
-    # Section 2: Sales Performance
-    st.markdown("#### 🏆 2. Sales Performance")
-    col_s1, col_s2 = st.columns([3, 1])
-    with col_s1:
         st.markdown("<h5 style='font-weight:600;'>Score Breakdown by Category</h5>", unsafe_allow_html=True)
         cat_data = metrics.get("category_scores", {})
         if cat_data:
@@ -395,23 +459,23 @@ def render_dashboard_view(db: Session):
             st.plotly_chart(fig_cat, use_container_width=True)
         else:
             st.info("No category scores aggregated yet.")
-    with col_s2:
-        st.markdown(
-            "<div style='background-color:#fafafa; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-top:35px;'>"
-            "<strong>💡 Sales Coaching Tip:</strong><br><small style='color:#475569;'>"
-            "Objection Handling and Needs Discovery segments represent primary quality bottlenecks. "
-            "Focus on training agents to identify budget triggers and ask open-ended questions.</small>"
-            "</div>", unsafe_allow_html=True
-        )
+
+    st.markdown(
+        "<div style='background-color:#fafafa; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-top:20px;'>"
+        "<strong>💡 Sales Coaching Tip:</strong><br><small style='color:#475569;'>"
+        "Objection Handling and Needs Discovery segments represent primary quality bottlenecks. "
+        "Focus on training agents to identify budget triggers and ask open-ended questions.</small>"
+        "</div>", unsafe_allow_html=True
+    )
 
     st.markdown("---")
 
-    # Section 3: Compliance & Risk
-    st.markdown("#### ⚠️ 3. Compliance & Risk")
+    # Section 2: Compliance & Risk
+    st.markdown("#### ⚠️ 2. Compliance & Risk")
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.markdown("<h5 style='font-weight:600;'>Compliance & Violations Categories</h5>", unsafe_allow_html=True)
-        issues_data = DashboardService.get_issue_distribution(db)
+        issues_data = DashboardService.get_issue_distribution(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
         if issues_data["top_issues"]:
             df_issues = pd.DataFrame(issues_data["top_issues"])
             fig_issues = px.bar(
@@ -447,9 +511,9 @@ def render_dashboard_view(db: Session):
 
     st.markdown("---")
 
-    # Section 4: Recent Activity Table
-    st.markdown("#### 📋 4. Recent Activity")
-    history = DashboardService.get_history(db)
+    # Section 3: Recent Activity Table
+    st.markdown("#### 📋 3. Recent Activity")
+    history = DashboardService.get_history(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
     if history:
         # Get top 5 recent processed calls
         recent = history[:5]
@@ -500,13 +564,6 @@ def render_history_view(db: Session):
     """
     Renders the call log history list with filter options and select hooks.
     """
-    history = DashboardService.get_history(db)
-
-    if not history:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.info("💡 **No calls have been analyzed yet.** Head over to the Home view to upload an audio conversation.")
-        return
-
     # Title & Action columns
     col_title, col_actions = st.columns([3, 1.5])
     with col_title:
@@ -521,6 +578,65 @@ def render_history_view(db: Session):
             st.rerun()
 
     st.markdown("---")
+
+    # Load dynamic filter selectors
+    from backend.app.services.org_team_advisor_service import OrgTeamAdvisorService
+    orgs = OrgTeamAdvisorService.list_organizations(db)
+    org_names = ["All Organizations"] + [o.name for o in orgs]
+    
+    st.markdown("<div style='background-color:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px; margin-bottom:20px;'>", unsafe_allow_html=True)
+    st.markdown("<strong style='color:#475569;'>🔍 Filter Call Logs</strong>", unsafe_allow_html=True)
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    with col_f1:
+        f_org_name = st.selectbox("Organization Filter:", org_names)
+        
+    f_org_id = None
+    team_names = ["All Teams"]
+    if f_org_name != "All Organizations":
+        org_ref = next(o for o in orgs if o.name == f_org_name)
+        f_org_id = org_ref.id
+        teams = OrgTeamAdvisorService.list_teams(db, org_id=org_ref.id)
+        team_names += [t.name for t in teams]
+        
+    with col_f2:
+        f_team_name = st.selectbox("Team Filter:", team_names, disabled=(f_org_id is None))
+        
+    f_team_id = None
+    advisor_names = ["All Advisors"]
+    if f_team_name != "All Teams":
+        teams_list = OrgTeamAdvisorService.list_teams(db, org_id=f_org_id)
+        team_ref = next(t for t in teams_list if t.name == f_team_name)
+        f_team_id = team_ref.id
+        advisors = OrgTeamAdvisorService.list_advisors(db, team_id=team_ref.id)
+        advisor_names += [a.name for a in advisors]
+        
+    with col_f3:
+        f_advisor_name = st.selectbox("Advisor Filter:", advisor_names, disabled=(f_team_id is None))
+        
+    f_advisor_id = None
+    if f_advisor_name != "All Advisors":
+        advisors_list = OrgTeamAdvisorService.list_advisors(db, team_id=f_team_id)
+        adv_ref = next(a for a in advisors_list if a.name == f_advisor_name)
+        f_advisor_id = adv_ref.id
+        
+    sources = OrgTeamAdvisorService.list_ingestion_sources(db)
+    source_names = ["All Ingestion Sources"] + [s.name for s in sources]
+    with col_f4:
+        f_source_name = st.selectbox("Ingestion Source Filter:", source_names)
+        
+    f_source_id = None
+    if f_source_name != "All Ingestion Sources":
+        src_ref = next(s for s in sources if s.name == f_source_name)
+        f_source_id = src_ref.id
+        
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    history = DashboardService.get_history(db, f_org_id, f_team_id, f_advisor_id, f_source_id)
+
+    if not history:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.info("💡 **No calls match the selected filters or have been analyzed yet.** Adjust filters or go to the Home view to ingest recordings.")
+        return
 
     # Suggestion alert to export before deleting
     if st.session_state["delete_mode"]:
@@ -709,19 +825,31 @@ def render_call_details_view(call_id: int, db: Session):
     # Initialize active tab from session state to support cross-tab navigation/scrolling
     if "active_detail_tab" not in st.session_state:
         st.session_state["active_detail_tab"] = "Overview"
+    elif st.session_state["active_detail_tab"] in ["Gemini Process Trace", "Pipeline Timeline"]:
+        st.session_state["active_detail_tab"] = "Overview"
         
-    tab_options = ["Overview", "Speech Transcript", "Advisor/Customer Chat", "Gemini Process Trace", "Pipeline Timeline", "✍️ Human Feedback Loop"]
-    default_idx = tab_options.index(st.session_state["active_detail_tab"]) if st.session_state["active_detail_tab"] in tab_options else 0
+    active_tab = st.session_state["active_detail_tab"]
     
-    selected_section = st.radio(
-        "Select scorecard tab view:",
-        tab_options,
-        index=default_idx,
-        horizontal=True,
-        key=f"call_detail_section_selector_{call_id}",
-        label_visibility="collapsed"
-    )
-    st.session_state["active_detail_tab"] = selected_section
+    # Render tab bar using button group
+    col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+    with col_t1:
+        if st.button("📊 Overview", use_container_width=True, type="primary" if active_tab == "Overview" else "secondary", key=f"btn_tab_overview_{call_id}"):
+            st.session_state["active_detail_tab"] = "Overview"
+            st.rerun()
+    with col_t2:
+        if st.button("📝 Speech Transcript", use_container_width=True, type="primary" if active_tab == "Speech Transcript" else "secondary", key=f"btn_tab_transcript_{call_id}"):
+            st.session_state["active_detail_tab"] = "Speech Transcript"
+            st.rerun()
+    with col_t3:
+        if st.button("💬 Advisor/Customer Chat", use_container_width=True, type="primary" if active_tab == "Advisor/Customer Chat" else "secondary", key=f"btn_tab_chat_{call_id}"):
+            st.session_state["active_detail_tab"] = "Advisor/Customer Chat"
+            st.rerun()
+    with col_t4:
+        if st.button("✍️ Human Feedback Loop", use_container_width=True, type="primary" if active_tab == "✍️ Human Feedback Loop" else "secondary", key=f"btn_tab_feedback_{call_id}"):
+            st.session_state["active_detail_tab"] = "✍️ Human Feedback Loop"
+            st.rerun()
+
+    selected_section = active_tab
 
     if selected_section == "Overview":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>AI Audit Summary</h4>", unsafe_allow_html=True)
@@ -842,22 +970,7 @@ def render_call_details_view(call_id: int, db: Session):
                     f"</div>", unsafe_allow_html=True
                 )
 
-    elif selected_section == "Gemini Process Trace":
-        st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Multi-Agent Gemini Process Log</h4>", unsafe_allow_html=True)
-        analysis = details["analysis"]
-        if not analysis or "analysis_metadata" not in analysis:
-            st.warning("Gemini execution metadata logs not available.")
-        else:
-            st.json(analysis["analysis_metadata"])
 
-    elif selected_section == "Pipeline Timeline":
-        st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Pipeline Progression Timeline</h4>", unsafe_allow_html=True)
-        timeline = details["timeline"]
-        if not timeline:
-            st.warning("State transition logs are empty.")
-        else:
-            for event in timeline:
-                st.markdown(f"✔️ **{event['event']}** — <small style='color:#64748b;'>{event['timestamp']}</small>", unsafe_allow_html=True)
 
     elif selected_section == "✍️ Human Feedback Loop":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>✍️ Human Feedback Loop Panel</h4>", unsafe_allow_html=True)

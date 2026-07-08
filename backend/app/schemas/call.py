@@ -21,6 +21,12 @@ class CallBase(BaseSchema):
     customer_name: Optional[str] = Field(default=None)
     advisor_name: Optional[str] = Field(default=None)
     ingestion_metadata: Optional[str] = Field(default=None)
+    
+    # New Org hierarchy IDs
+    organization_id: Optional[int] = Field(default=None)
+    team_id: Optional[int] = Field(default=None)
+    advisor_id: Optional[int] = Field(default=None)
+    source_id: Optional[int] = Field(default=None)
 
 class CallCreate(CallBase):
     pass
@@ -40,6 +46,10 @@ class CallUpdate(BaseSchema):
     customer_name: Optional[str] = Field(None)
     advisor_name: Optional[str] = Field(None)
     ingestion_metadata: Optional[str] = Field(None)
+    organization_id: Optional[int] = Field(default=None)
+    team_id: Optional[int] = Field(default=None)
+    advisor_id: Optional[int] = Field(default=None)
+    source_id: Optional[int] = Field(default=None)
 
 class Call(CallBase, TimestampSchema):
     id: int

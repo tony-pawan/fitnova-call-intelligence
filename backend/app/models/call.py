@@ -8,6 +8,8 @@ from backend.app.database.base import Base  # pyrefly: ignore [missing-import]
 if TYPE_CHECKING:
     from backend.app.models.transcript import TranscriptSegment
     from backend.app.models.analysis import CallAnalysis
+    from backend.app.models.advisor import Advisor
+    from backend.app.models.ingestion_source import IngestionSource
 
 class CallStatus(str, enum.Enum):
     Uploaded = "Uploaded"
@@ -43,6 +45,12 @@ class Call(Base):
     advisor_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     ingestion_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # New Organization hierarchy foreign keys
+    organization_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    advisor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("advisors.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ingestion_sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
         server_default=func.now(), 
@@ -67,3 +75,6 @@ class Call(Base):
         cascade="all, delete-orphan",
         uselist=False
     )
+
+    advisor: Mapped[Optional["Advisor"]] = relationship("Advisor", back_populates="calls")
+    ingestion_source: Mapped[Optional["IngestionSource"]] = relationship("IngestionSource", back_populates="calls")

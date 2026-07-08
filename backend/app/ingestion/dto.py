@@ -1,18 +1,35 @@
 from pydantic import BaseModel, Field  # pyrefly: ignore [missing-import]
 from typing import Optional, Dict, Any
+from datetime import datetime
 
-class AudioInput(BaseModel):
+class CallInput(BaseModel):
     """
-    Unified Data Transfer Object representing a standardized incoming call ingestion payload.
+    Canonical Data Transfer Object returned by all source-agnostic connectors
+    before entering the processing pipeline.
     """
-    source: str = Field(..., description="Ingestion source type (e.g., Upload, Folder, CRM, API, Telephony, Dialer)")
-    vendor: str = Field(..., description="Specific vendor or connector name (e.g., Twilio, Salesforce, Local)")
-    audio_path: str = Field(..., description="Absolute local filesystem path to the audio recording")
-    original_filename: str = Field(..., description="Base filename of the recording")
-    mime_type: str = Field(..., description="MIME type of the audio file")
-    duration: float = Field(default=0.0, description="Recording duration in seconds")
-    call_time: Optional[str] = Field(default=None, description="ISO 8601 timestamp of the call execution")
+    call_id: Optional[int] = None
+    organization_id: Optional[int] = None
+    team_id: Optional[int] = None
+    advisor_id: Optional[int] = None
+    source_id: Optional[int] = None
+    audio_path: str
+    original_filename: str
+    mime_type: str
+    duration: float = 0.0
+    recorded_at: datetime = Field(default_factory=datetime.now)
+    language: Optional[str] = "en"
+    
+    # Ingestion origin and connector fields (for backwards compatibility)
+    source: str = Field(default="Upload", description="Ingestion source type")
+    vendor: str = Field(default="Direct", description="Specific vendor or connector name")
+    call_time: Optional[str] = Field(default=None, description="ISO timestamp")
     external_call_id: Optional[str] = Field(default=None, description="External vendor unique call identifier")
     customer_name: Optional[str] = Field(default=None, description="Name of the customer client")
     advisor_name: Optional[str] = Field(default=None, description="Name of the advisor agent")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Key-value custom vendor attributes")
+
+class AudioInput(CallInput):
+    """
+    Backwards compatibility subclass alias for existing ingestion connectors.
+    """
+    pass

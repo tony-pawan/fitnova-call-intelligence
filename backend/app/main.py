@@ -43,3 +43,5 @@ def on_startup() -> None:
 @app.on_event("shutdown")
 def on_shutdown() -> None:
     logger.info("FitNova API shutting down...")
+
+# Trigger auto-reload to terminate active background processing threads cleanly

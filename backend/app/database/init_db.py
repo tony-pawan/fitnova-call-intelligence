@@ -9,6 +9,10 @@ from backend.app.models.analysis import CallAnalysis
 from backend.app.models.transcript import TranscriptSegment
 from backend.app.models.issue_tag import IssueTag
 from backend.app.models.version_models import TranscriptVersion, ConversationVersion, AnalysisVersion
+from backend.app.models.organization import Organization
+from backend.app.models.team import Team
+from backend.app.models.advisor import Advisor
+from backend.app.models.ingestion_source import IngestionSource
 from sqlalchemy import text  # pyrefly: ignore [missing-import]
 
 logger = get_logger("DATABASE")
@@ -46,6 +50,16 @@ def init_db() -> None:
             if "ingestion_metadata" not in call_cols:
                 conn.execute(text("ALTER TABLE calls ADD COLUMN ingestion_metadata TEXT;"))
             
+            # New Org data hierarchy migration columns
+            if "organization_id" not in call_cols:
+                conn.execute(text("ALTER TABLE calls ADD COLUMN organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL;"))
+            if "team_id" not in call_cols:
+                conn.execute(text("ALTER TABLE calls ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL;"))
+            if "advisor_id" not in call_cols:
+                conn.execute(text("ALTER TABLE calls ADD COLUMN advisor_id INTEGER REFERENCES advisors(id) ON DELETE SET NULL;"))
+            if "source_id" not in call_cols:
+                conn.execute(text("ALTER TABLE calls ADD COLUMN source_id INTEGER REFERENCES ingestion_sources(id) ON DELETE SET NULL;"))
+            
             # 2. Update 'issue_tags' table
             if "review_status" not in tag_cols:
                 conn.execute(text("ALTER TABLE issue_tags ADD COLUMN review_status VARCHAR(100) DEFAULT 'Pending';"))
@@ -58,7 +72,17 @@ def init_db() -> None:
             if "evidence_segments" not in tag_cols:
                 conn.execute(text("ALTER TABLE issue_tags ADD COLUMN evidence_segments TEXT;"))
             
-        logger.info("Database schema upgrades completed successfully.")
+        logger.info("Database schema upgrades completed successfully. Triggering data seed...")
+        
+        from backend.app.database.session import SessionLocal
+        from backend.app.services.org_team_advisor_service import OrgTeamAdvisorService
+        db = SessionLocal()
+        try:
+            OrgTeamAdvisorService.seed_initial_org_data(db)
+            logger.info("Database baseline seed complete.")
+        finally:
+            db.close()
+            
     except Exception as e:
         logger.error(f"Error initializing or upgrading database schemas: {e}")
         raise

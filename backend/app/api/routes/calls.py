@@ -17,6 +17,10 @@ upload_service = UploadService()
 @router.post("/upload")
 def upload_call(
     audio_file: UploadFile = File(...),
+    organization_id: Optional[int] = Form(None),
+    team_id: Optional[int] = Form(None),
+    advisor_id: Optional[int] = Form(None),
+    source_id: Optional[int] = Form(None),
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
@@ -30,7 +34,11 @@ def upload_call(
     db_call = upload_service.upload_call(
         db=db, 
         audio_file=audio_file,
-        background_tasks=background_tasks
+        background_tasks=background_tasks,
+        organization_id=organization_id,
+        team_id=team_id,
+        advisor_id=advisor_id,
+        source_id=source_id
     )
     
     return {
@@ -107,6 +115,10 @@ def ingest_call(
     external_call_id: Optional[str] = Form(None),
     api_audio_file: Optional[UploadFile] = File(None),
     api_metadata_json: Optional[str] = Form(None),
+    organization_id: Optional[int] = Form(None),
+    team_id: Optional[int] = Form(None),
+    advisor_id: Optional[int] = Form(None),
+    source_id: Optional[int] = Form(None),
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
@@ -119,7 +131,12 @@ def ingest_call(
         background_tasks = BackgroundTasks()
 
     try:
-        ingest_kwargs = {}
+        ingest_kwargs = {
+            "organization_id": organization_id,
+            "team_id": team_id,
+            "advisor_id": advisor_id,
+            "source_id": source_id
+        }
         src = source_type.lower()
         
         if src == "upload":
@@ -130,12 +147,12 @@ def ingest_call(
             with open(temp_path, "wb") as f:
                 f.write(api_audio_file.file.read())
             
-            ingest_kwargs = {
+            ingest_kwargs.update({
                 "filename": api_audio_file.filename,
                 "temp_path": temp_path,
                 "size_bytes": os.path.getsize(temp_path),
                 "metadata": {"vendor": "Direct Manual Upload"}
-            }
+            })
             
         elif src == "folder":
             if not folder_path:

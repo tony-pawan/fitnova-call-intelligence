@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from fastapi import UploadFile, HTTPException, BackgroundTasks  # type: ignore
 from sqlalchemy.orm import Session  # type: ignore
 
@@ -17,11 +18,15 @@ class UploadService:
         self,
         db: Session,
         audio_file: UploadFile,
-        background_tasks: BackgroundTasks
+        background_tasks: BackgroundTasks,
+        organization_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
     ) -> Call:
         """
         Coordinates the complete end-to-end upload sequence:
-        Validation ➔ Save to Disk ➔ Metadata Extraction ➔ Database Persistence ➔ Trigger Pipeline
+        Validation ➔ Save to Disk ➔ Metadata Extraction ➔ CallInput DTO Mapping ➔ Database Persistence ➔ Trigger Pipeline
         """
         logger.info("[UPLOAD] Upload request received")
 
@@ -69,18 +74,36 @@ class UploadService:
         audio_path = storage_meta["audio_path"]
         metadata = extract_audio_metadata(audio_path)
 
-        # 7. Create database call record in PostgreSQL
-        logger.info("[UPLOAD] Database record created")
+        # 7. Map to canonical CallInput DTO via ManualUploadConnector
+        from backend.app.ai.ingestion.connector import ManualUploadConnector
+        connector = ManualUploadConnector()
+        call_input = connector.ingest({
+            "audio_path": audio_path,
+            "original_filename": filename,
+            "mime_type": audio_file.content_type or f"audio/{ext.lstrip('.')}",
+            "duration": metadata["duration_seconds"],
+            "organization_id": organization_id,
+            "team_id": team_id,
+            "advisor_id": advisor_id,
+            "source_id": source_id
+        })
+
+        # 8. Create database call record in PostgreSQL using canonical CallInput
+        logger.info("[UPLOAD] Database record created via CallInput DTO")
         try:
             db_call = Call(
-                original_filename=filename,
+                original_filename=call_input.original_filename,
                 stored_filename=storage_meta["stored_filename"],
-                audio_path=audio_path,
-                mime_type=audio_file.content_type or f"audio/{ext.lstrip('.')}",
+                audio_path=call_input.audio_path,
+                mime_type=call_input.mime_type,
                 file_size_bytes=storage_meta["file_size_bytes"],
-                duration_seconds=metadata["duration_seconds"],
+                duration_seconds=call_input.duration,
                 status=CallStatus.Uploaded,
-                language="en"
+                language=call_input.language,
+                organization_id=call_input.organization_id,
+                team_id=call_input.team_id,
+                advisor_id=call_input.advisor_id,
+                source_id=call_input.source_id
             )
             db.add(db_call)
             db.commit()
@@ -88,13 +111,12 @@ class UploadService:
         except Exception as e:
             logger.error(f"[UPLOAD] Database failure: {e}")
             db.rollback()
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
+            self.storage_manager.delete_file(audio_path)
             raise HTTPException(status_code=500, detail="Failed to persist call recording entry to database")
 
         logger.info("[UPLOAD] Upload completed")
 
-        # 8. Trigger asynchronous processing pipeline
+        # 9. Trigger asynchronous processing pipeline
         from backend.app.pipeline.background import trigger_call_processing
         trigger_call_processing(db_call.id, background_tasks)
 

@@ -8,6 +8,8 @@ Evaluate the Advisor's conversational pacing, objection handling, active listeni
 Assign a score from 0.0 to 100.0.
 
 For `issue_tags`, populate this array ONLY when actual conversational technique gaps, weak objection handling, poor closing, or communication flaws are observed. If no gaps or technique concerns are found, you must return an empty list `[]`.
+Keep the summary, strengths, weaknesses, and recommendations highly concise.
+Limit the number of elements in the `issue_tags` list to a maximum of 5 main issues, and limit the `evidence_segments` per issue to a maximum of 2 critical segments. This is required to keep the response length short and prevent output truncation.
 
 Expected output JSON schema:
 {schema}

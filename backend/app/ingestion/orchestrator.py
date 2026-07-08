@@ -58,7 +58,11 @@ class IngestionOrchestrator:
                     external_call_id=audio_input.external_call_id,
                     customer_name=audio_input.customer_name,
                     advisor_name=audio_input.advisor_name,
-                    ingestion_metadata=json.dumps(audio_input.metadata)
+                    ingestion_metadata=json.dumps(audio_input.metadata),
+                    organization_id=getattr(audio_input, "organization_id", None),
+                    team_id=getattr(audio_input, "team_id", None),
+                    advisor_id=getattr(audio_input, "advisor_id", None),
+                    source_id=getattr(audio_input, "source_id", None)
                 )
                 db.add(db_call)
                 db.flush()  # assign database ID to db_call

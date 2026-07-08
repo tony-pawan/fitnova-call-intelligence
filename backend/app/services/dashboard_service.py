@@ -20,11 +20,27 @@ class DashboardService:
     """
 
     @staticmethod
-    def get_category_scores_aggregation(db: Session) -> Dict[str, float]:
+    def get_category_scores_aggregation(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> Dict[str, float]:
         """
-        Aggregates average category scores across all processed calls.
+        Aggregates average category scores across processed calls matching filter constraints.
         """
-        analyses = db.query(CallAnalysis).all()
+        query = db.query(CallAnalysis).join(Call)
+        if org_id is not None:
+            query = query.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            query = query.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            query = query.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            query = query.filter(Call.source_id == source_id)
+            
+        analyses = query.all()
         categories = {
             "Needs Discovery": [],
             "Compliance": [],
@@ -60,11 +76,27 @@ class DashboardService:
         return {cat: round(sum(vals) / len(vals), 1) if vals else 0.0 for cat, vals in categories.items()}
 
     @staticmethod
-    def get_pipeline_stage_durations(db: Session) -> Dict[str, float]:
+    def get_pipeline_stage_durations(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> Dict[str, float]:
         """
         Calculates average durations of pipeline execution stages from timeline logs.
         """
-        calls = db.query(Call).filter(Call.status == CallStatus.Completed).all()
+        query = db.query(Call).filter(Call.status == CallStatus.Completed)
+        if org_id is not None:
+            query = query.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            query = query.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            query = query.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            query = query.filter(Call.source_id == source_id)
+            
+        calls = query.all()
         stage_times = {"Upload": [], "Transcription": [], "Diarization": [], "AI Analysis": []}
         
         for c in calls:
@@ -116,17 +148,46 @@ class DashboardService:
         return averages
 
     @staticmethod
-    def get_dashboard_metrics(db: Session) -> Dict[str, Any]:
+    def get_dashboard_metrics(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
-        Retrieves top-level metrics for processed calls.
+        Retrieves top-level metrics for processed calls matching filter constraints.
         """
-        total_calls = db.query(Call).count()
-        completed_calls = db.query(Call).filter(Call.status == CallStatus.Completed).count()
+        # Base Call Query with filters
+        call_q = db.query(Call)
+        if org_id is not None:
+            call_q = call_q.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            call_q = call_q.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            call_q = call_q.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            call_q = call_q.filter(Call.source_id == source_id)
+            
+        total_calls = call_q.count()
+        completed_calls = call_q.filter(Call.status == CallStatus.Completed).count()
+        failed_calls = call_q.filter(Call.status == CallStatus.Failed).count()
         
-        analyses = db.query(CallAnalysis).all()
+        # Base Analysis Query with filters
+        anal_q = db.query(CallAnalysis).join(Call)
+        if org_id is not None:
+            anal_q = anal_q.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            anal_q = anal_q.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            anal_q = anal_q.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            anal_q = anal_q.filter(Call.source_id == source_id)
+            
+        analyses = anal_q.all()
         avg_score = round(sum(a.overall_score for a in analyses) / len(analyses), 1) if analyses else 0.0
 
-        calls = db.query(Call).all()
+        calls = call_q.all()
         avg_duration = round(sum(c.duration_seconds for c in calls) / len(calls), 1) if calls else 0.0
 
         # Calculate calls requiring review: score < 70 or has issues flagged
@@ -140,11 +201,11 @@ class DashboardService:
 
         # Operational Dashboard metrics
         # 1. Calls by Ingestion Source
-        source_counts = db.query(Call.source, func.count(Call.id)).group_by(Call.source).all()
+        source_counts = call_q.with_entities(Call.source, func.count(Call.id)).group_by(Call.source).all()
         calls_by_source = {s: count for s, count in source_counts}
         
         # 2. Calls by Vendor
-        vendor_counts = db.query(Call.vendor, func.count(Call.id)).group_by(Call.vendor).all()
+        vendor_counts = call_q.with_entities(Call.vendor, func.count(Call.id)).group_by(Call.vendor).all()
         calls_by_vendor = {v: count for v, count in vendor_counts}
         
         # 3. Average Processing Time
@@ -158,12 +219,10 @@ class DashboardService:
         avg_processing_time = round(sum(processing_times) / len(processing_times), 1) if processing_times else 0.0
         
         # 4. Source Health & Failures
-        failed_calls = db.query(Call).filter(Call.status == CallStatus.Failed).count()
-        
         source_health = {}
         for src in ["Upload", "Folder", "CRM", "API", "Telephony", "Dialer"]:
-            src_total = db.query(Call).filter(Call.source == src).count()
-            src_failed = db.query(Call).filter(Call.source == src, Call.status == CallStatus.Failed).count()
+            src_total = call_q.filter(Call.source == src).count()
+            src_failed = call_q.filter(Call.source == src, Call.status == CallStatus.Failed).count()
             if src_total == 0:
                 source_health[src] = "Inactive"
             else:
@@ -171,12 +230,12 @@ class DashboardService:
                 if fail_rate >= 0.5:
                     source_health[src] = "Error"
                 elif fail_rate > 0.0:
-                    source_health[src] = "Error"  # Use Active, Inactive, Error as required
+                    source_health[src] = "Error"
                 else:
                     source_health[src] = "Active"
 
-        category_scores = DashboardService.get_category_scores_aggregation(db)
-        stage_durations = DashboardService.get_pipeline_stage_durations(db)
+        category_scores = DashboardService.get_category_scores_aggregation(db, org_id, team_id, advisor_id, source_id)
+        stage_durations = DashboardService.get_pipeline_stage_durations(db, org_id, team_id, advisor_id, source_id)
 
         return {
             "total_calls": total_calls,
@@ -194,11 +253,27 @@ class DashboardService:
         }
 
     @staticmethod
-    def get_score_trends(db: Session) -> List[Dict[str, Any]]:
+    def get_score_trends(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Retrieves timeline score trends for successfully processed call recordings.
+        Retrieves timeline score trends for successfully processed call recordings matching filters.
         """
-        results = db.query(Call, CallAnalysis).join(CallAnalysis).order_by(Call.created_at.asc()).all()
+        query = db.query(Call, CallAnalysis).join(CallAnalysis)
+        if org_id is not None:
+            query = query.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            query = query.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            query = query.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            query = query.filter(Call.source_id == source_id)
+            
+        results = query.order_by(Call.created_at.asc()).all()
         trends = []
         for call, analysis in results:
             date_str = call.created_at.strftime("%Y-%m-%d") if isinstance(call.created_at, datetime) else str(call.created_at)
@@ -210,11 +285,27 @@ class DashboardService:
         return trends
 
     @staticmethod
-    def get_issue_distribution(db: Session) -> Dict[str, Any]:
+    def get_issue_distribution(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
-        Returns count breakdown of compliance issues and severity distributions.
+        Returns count breakdown of compliance issues and severity distributions matching filters.
         """
-        issue_tags = db.query(IssueTag).all()
+        query = db.query(IssueTag).join(CallAnalysis).join(Call)
+        if org_id is not None:
+            query = query.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            query = query.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            query = query.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            query = query.filter(Call.source_id == source_id)
+            
+        issue_tags = query.all()
         
         issue_counts = {}
         severity_counts = {"Low": 0, "Medium": 0, "High": 0, "Critical": 0}
@@ -235,22 +326,52 @@ class DashboardService:
         }
 
     @staticmethod
-    def get_processing_statistics(db: Session) -> Dict[str, int]:
+    def get_processing_statistics(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> Dict[str, int]:
         """
-        Gathers count stats for background task executions by status.
+        Gathers count stats for background task executions by status matching filters.
         """
         stats = {}
         for s in CallStatus:
-            count = db.query(Call).filter(Call.status == s).count()
-            stats[s.value] = count
+            query = db.query(Call).filter(Call.status == s)
+            if org_id is not None:
+                query = query.filter(Call.organization_id == org_id)
+            if team_id is not None:
+                query = query.filter(Call.team_id == team_id)
+            if advisor_id is not None:
+                query = query.filter(Call.advisor_id == advisor_id)
+            if source_id is not None:
+                query = query.filter(Call.source_id == source_id)
+            stats[s.value] = query.count()
         return stats
 
     @staticmethod
-    def get_history(db: Session) -> List[Dict[str, Any]]:
+    def get_history(
+        db: Session,
+        org_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Lists all call records with details for overview tables.
+        Lists call records matching filters with details for overview tables.
         """
-        calls = db.query(Call).order_by(Call.created_at.desc()).all()
+        query = db.query(Call)
+        if org_id is not None:
+            query = query.filter(Call.organization_id == org_id)
+        if team_id is not None:
+            query = query.filter(Call.team_id == team_id)
+        if advisor_id is not None:
+            query = query.filter(Call.advisor_id == advisor_id)
+        if source_id is not None:
+            query = query.filter(Call.source_id == source_id)
+            
+        calls = query.order_by(Call.created_at.desc()).all()
         history = []
         for c in calls:
             c_analysis = db.query(CallAnalysis).filter(CallAnalysis.call_id == c.id).first()

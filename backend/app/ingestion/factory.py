@@ -17,7 +17,11 @@ class ConnectorFactory:
                 filename=kwargs.get("filename"),
                 temp_path=kwargs.get("temp_path"),
                 size_bytes=kwargs.get("size_bytes"),
-                metadata=kwargs.get("metadata")
+                metadata=kwargs.get("metadata"),
+                organization_id=kwargs.get("organization_id"),
+                team_id=kwargs.get("team_id"),
+                advisor_id=kwargs.get("advisor_id"),
+                source_id=kwargs.get("source_id")
             )
         elif src_lower == "folder":
             return FolderConnector(

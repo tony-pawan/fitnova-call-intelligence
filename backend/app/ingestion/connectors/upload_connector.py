@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from backend.app.ingestion.base import SourceConnector
 from backend.app.ingestion.dto import AudioInput
 from backend.app.core.logging import get_logger
@@ -11,11 +11,25 @@ class UploadConnector(SourceConnector):
     """
     Ingestion connector for directly uploaded audio recordings.
     """
-    def __init__(self, filename: str, temp_path: str, size_bytes: int, metadata: Dict[str, Any] = None):
+    def __init__(
+        self,
+        filename: str,
+        temp_path: str,
+        size_bytes: int,
+        metadata: Dict[str, Any] = None,
+        organization_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        advisor_id: Optional[int] = None,
+        source_id: Optional[int] = None
+    ):
         self.filename = filename
         self.temp_path = temp_path
         self.size_bytes = size_bytes
         self.meta = metadata or {}
+        self.organization_id = organization_id
+        self.team_id = team_id
+        self.advisor_id = advisor_id
+        self.source_id = source_id
 
     def connect(self) -> bool:
         return True
@@ -66,5 +80,9 @@ class UploadConnector(SourceConnector):
             external_call_id=meta.get("external_call_id"),
             customer_name=meta.get("customer_name"),
             advisor_name=meta.get("advisor_name"),
-            metadata=meta
+            metadata=meta,
+            organization_id=self.organization_id,
+            team_id=self.team_id,
+            advisor_id=self.advisor_id,
+            source_id=self.source_id
         )
