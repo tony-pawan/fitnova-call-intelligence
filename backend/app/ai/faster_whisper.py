@@ -54,7 +54,9 @@ class FasterWhisperTranscriber(Transcriber):
         if api_key and api_key != "mock_key_for_development":
             try:
                 logger.info("Performing transcription via Gemini API for Hinglish accuracy")
+                # pyrefly: ignore [missing-import]
                 import google.generativeai as genai
+                # pyrefly: ignore [missing-import]
                 from pydantic import BaseModel
                 from typing import List
                 import json
@@ -92,43 +94,25 @@ class FasterWhisperTranscriber(Transcriber):
                     "Output the result in structured JSON format matching the schema."
                 )
                 
-                max_retries = 3
-                backoff = 12.0
-                response_text = None
                 model_name = settings.GEMINI_MODEL
-                
-                for attempt in range(max_retries + 1):
-                    try:
-                        logger.info(f"Gemini transcription request started (attempt {attempt + 1})")
-                        model = genai.GenerativeModel(model_name)
-                        response = model.generate_content(
-                            [
-                                {
-                                    "mime_type": mime_type,
-                                    "data": audio_bytes
-                                },
-                                prompt
-                            ],
-                            generation_config=genai.GenerationConfig(
-                                response_mime_type="application/json",
-                                response_schema=TranscriptSchema,
-                                temperature=0.1
-                            ),
-                            request_options={"timeout": 45.0}
-                        )
-                        response_text = response.text
-                        break
-                    except Exception as ex:
-                        err_msg = str(ex)
-                        is_rate_limit = "429" in err_msg or "quota" in err_msg or "ResourceExhausted" in err_msg or "rate limit" in err_msg
-                        is_daily_limit = "PerDay" in err_msg or "daily" in err_msg
-                        
-                        if is_rate_limit and not is_daily_limit and attempt < max_retries:
-                            logger.warning(f"Gemini API rate limit exceeded during transcription. Retrying in {backoff} seconds...")
-                            time.sleep(backoff)
-                            backoff *= 2
-                            continue
-                        raise ex
+                logger.info("Gemini transcription request started")
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    [
+                        {
+                            "mime_type": mime_type,
+                            "data": audio_bytes
+                        },
+                        prompt
+                    ],
+                    generation_config=genai.GenerationConfig(
+                        response_mime_type="application/json",
+                        response_schema=TranscriptSchema,
+                        temperature=0.1
+                    ),
+                    request_options={"timeout": 45.0}
+                )
+                response_text = response.text
                 
                 if not response_text:
                     raise RuntimeError("Empty response received from Gemini transcription")

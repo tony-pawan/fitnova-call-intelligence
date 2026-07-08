@@ -125,42 +125,25 @@ class PyannoteDiarizer(Diarizer):
                 elif ext == ".aac":
                     mime_type = "audio/aac"
                     
-                max_retries = 3
-                backoff = 12.0
-                response_text = None
                 model_name = settings.GEMINI_MODEL
-                
-                for attempt in range(max_retries + 1):
-                    try:
-                        logger.info(f"Gemini diarization request started (attempt {attempt + 1})")
-                        model = genai.GenerativeModel(model_name)
-                        response = model.generate_content(
-                            [
-                                {
-                                    "mime_type": mime_type,
-                                    "data": audio_bytes
-                                },
-                                prompt
-                            ],
-                            generation_config=genai.GenerationConfig(
-                                response_mime_type="application/json",
-                                response_schema=DiarizationSchema,
-                                temperature=0.1
-                            )
-                        )
-                        response_text = response.text
-                        break
-                    except Exception as ex:
-                        err_msg = str(ex)
-                        is_rate_limit = "429" in err_msg or "quota" in err_msg or "ResourceExhausted" in err_msg or "rate limit" in err_msg
-                        is_daily_limit = "PerDay" in err_msg or "daily" in err_msg
-                        
-                        if is_rate_limit and not is_daily_limit and attempt < max_retries:
-                            logger.warning(f"Gemini API rate limit exceeded during diarization. Retrying in {backoff} seconds...")
-                            time.sleep(backoff)
-                            backoff *= 2
-                            continue
-                        raise ex
+                logger.info("Gemini diarization request started")
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    [
+                        {
+                            "mime_type": mime_type,
+                            "data": audio_bytes
+                        },
+                        prompt
+                    ],
+                    generation_config=genai.GenerationConfig(
+                        response_mime_type="application/json",
+                        response_schema=DiarizationSchema,
+                        temperature=0.1
+                    ),
+                    request_options={"timeout": 15.0}
+                )
+                response_text = response.text
                         
                 if not response_text:
                     raise RuntimeError("Empty response received from Gemini diarization")
