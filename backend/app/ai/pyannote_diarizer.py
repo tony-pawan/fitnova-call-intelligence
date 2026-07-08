@@ -128,7 +128,7 @@ class PyannoteDiarizer(Diarizer):
                 max_retries = 3
                 backoff = 12.0
                 response_text = None
-                model_name = "gemini-2.5-flash-lite"
+                model_name = settings.GEMINI_MODEL
                 
                 for attempt in range(max_retries + 1):
                     try:
