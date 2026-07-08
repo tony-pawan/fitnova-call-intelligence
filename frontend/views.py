@@ -681,37 +681,47 @@ def render_call_details_view(call_id: int, db: Session):
     from backend.app.services.feedback_service import FeedbackService
     history_versions = FeedbackService.get_version_history(db, call_id)
 
-    # Revision Selectors
-    col_v1, col_v2 = st.columns(2)
-    with col_v1:
-        t_vers = ["Active Version"] + [f"v{v['version']} (Saved {v['created_at'][11:16]})" for v in history_versions["transcripts"]]
-        selected_ver = st.selectbox("📂 Dialogue revision:", t_vers)
-        if selected_ver != "Active Version":
-            v_num = int(selected_ver.split(" ")[0][1:])
-            for v_record in history_versions["transcripts"]:
-                if v_record["version"] == v_num:
-                    details["transcript"] = load_json(v_record["file_path"])
-            for v_record in history_versions["conversations"]:
-                if v_record["version"] == v_num:
-                    details["conversation"] = load_json(v_record["file_path"])
+    # Only render version revision selectors if there is actually more than 1 version!
+    if len(history_versions["transcripts"]) > 1 or len(history_versions["analyses"]) > 1:
+        # Revision Selectors
+        col_v1, col_v2 = st.columns(2)
+        with col_v1:
+            t_vers = ["Active Version"] + [f"v{v['version']} (Saved {v['created_at'][11:16]})" for v in history_versions["transcripts"]]
+            selected_ver = st.selectbox("📂 Dialogue revision:", t_vers)
+            if selected_ver != "Active Version":
+                v_num = int(selected_ver.split(" ")[0][1:])
+                for v_record in history_versions["transcripts"]:
+                    if v_record["version"] == v_num:
+                        details["transcript"] = load_json(v_record["file_path"])
+                for v_record in history_versions["conversations"]:
+                    if v_record["version"] == v_num:
+                        details["conversation"] = load_json(v_record["file_path"])
 
-    with col_v2:
-        a_vers = ["Active Scorecard"] + [f"v{v['version']} (Score: {v['overall_score']})" for v in history_versions["analyses"]]
-        selected_a_ver = st.selectbox("📊 Scorecard revision:", a_vers)
-        if selected_a_ver != "Active Scorecard":
-            av_num = int(selected_a_ver.split(" ")[0][1:])
-            for v_record in history_versions["analyses"]:
-                if v_record["version"] == av_num:
-                    details["analysis"] = load_json(v_record["file_path"])
+        with col_v2:
+            a_vers = ["Active Scorecard"] + [f"v{v['version']} (Score: {v['overall_score']})" for v in history_versions["analyses"]]
+            selected_a_ver = st.selectbox("📊 Scorecard revision:", a_vers)
+            if selected_a_ver != "Active Scorecard":
+                av_num = int(selected_a_ver.split(" ")[0][1:])
+                for v_record in history_versions["analyses"]:
+                    if v_record["version"] == av_num:
+                        details["analysis"] = load_json(v_record["file_path"])
 
-    # Render horizontal navigation selector to prevent tall DOM heights and scroll jumping!
+    # Initialize active tab from session state to support cross-tab navigation/scrolling
+    if "active_detail_tab" not in st.session_state:
+        st.session_state["active_detail_tab"] = "Overview"
+        
+    tab_options = ["Overview", "Speech Transcript", "Advisor/Customer Chat", "Gemini Process Trace", "Pipeline Timeline", "✍️ Human Feedback Loop"]
+    default_idx = tab_options.index(st.session_state["active_detail_tab"]) if st.session_state["active_detail_tab"] in tab_options else 0
+    
     selected_section = st.radio(
         "Select scorecard tab view:",
-        ["Overview", "Speech Transcript", "Advisor/Customer Chat", "Gemini Process Trace", "Pipeline Timeline", "✍️ Human Feedback Loop"],
+        tab_options,
+        index=default_idx,
         horizontal=True,
         key=f"call_detail_section_selector_{call_id}",
         label_visibility="collapsed"
     )
+    st.session_state["active_detail_tab"] = selected_section
 
     if selected_section == "Overview":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>AI Audit Summary</h4>", unsafe_allow_html=True)
@@ -785,9 +795,34 @@ def render_call_details_view(call_id: int, db: Session):
         if not transcript or "segments" not in transcript:
             st.warning("Speech transcription segment JSON not available yet.")
         else:
+            highlight_time = st.session_state.get("highlight_timestamp", None)
+            
+            # Anchor element at top
+            st.markdown("<div id='top-of-transcript'></div>", unsafe_allow_html=True)
+            
             for seg in transcript["segments"]:
                 min_sec = f"{int(seg['start'] // 60)}:{int(seg['start'] % 60):02d}"
-                st.markdown(f"**[{min_sec}]** {seg['text']}")
+                
+                is_target = False
+                if highlight_time is not None and abs(seg["start"] - highlight_time) <= 3.0:
+                    is_target = True
+                    
+                if is_target:
+                    st.markdown(
+                        f"<div id='evidence-highlight' style='background-color: #fef08a; border: 2px solid #eab308; padding: 12px; border-radius: 6px; margin: 8px 0; font-weight: 600; color: #854d0e;'>"
+                        f"👉 🚨 [TARGET EVIDENCE] [{min_sec}] {seg['text']}"
+                        f"</div>"
+                        f"<script>"
+                        f"document.getElementById('evidence-highlight').scrollIntoView({{behavior: 'smooth', block: 'center'}});"
+                        f"</script>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown(f"**[{min_sec}]** {seg['text']}")
+                    
+            # Clear state immediately so subsequent tab checks don't repeat scrolling
+            if "highlight_timestamp" in st.session_state:
+                del st.session_state["highlight_timestamp"]
 
     elif selected_section == "Advisor/Customer Chat":
         st.markdown("<h4 style='color:#4f46e5;font-weight:600;'>Advisor vs. Customer Conversation</h4>", unsafe_allow_html=True)
@@ -839,55 +874,67 @@ def render_call_details_view(call_id: int, db: Session):
             from backend.app.models.analysis import CallAnalysis
             db_analysis = db.query(CallAnalysis).filter(CallAnalysis.call_id == call_id).first()
             
-            if db_analysis and db_analysis.issue_tags:
-                # Reviewer Summary at the top
+            if not db_analysis or not db_analysis.issue_tags:
+                st.markdown(
+                    f"<div style='text-align: center; padding: 40px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; margin: 20px 0;'>"
+                    f"<h2 style='color: #166534;'>✅ No violations detected</h2>"
+                    f"<p style='color: #15803d; font-size: 1.1rem; margin-top: 10px;'>The AI analysis found no compliance or sales quality issues.</p>"
+                    f"</div>", unsafe_allow_html=True
+                )
+            else:
+                # Reviewer Summary KPI Cards at the top
                 st.markdown("##### Reviewer Summary")
                 app_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "Approve")
                 dsm_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "Dismiss")
                 fp_c = sum(1 for t in db_analysis.issue_tags if t.review_status == "False Positive")
                 pending_c = sum(1 for t in db_analysis.issue_tags if t.review_status in ["Pending", "Needs Human Review"])
                 
-                sc1, sc2, sc3, sc4, sc5 = st.columns([1, 1, 1, 1, 2.5])
+                sc1, sc2, sc3, sc4 = st.columns(4)
                 with sc1:
-                    st.metric("Approved", app_c)
+                    st.markdown(
+                        f"<div style='background-color:#f0fdf4; border-left: 5px solid #22c55e; padding: 12px; border-radius: 8px; text-align: center;'>"
+                        f"<p style='margin:0; font-size:0.85rem; font-weight:600; color:#166534;'>✅ Approved</p>"
+                        f"<h3 style='margin:5px 0 0 0; color:#15803d; font-weight:700;'>{app_c}</h3>"
+                        f"</div>", unsafe_allow_html=True
+                    )
                 with sc2:
-                    st.metric("Dismissed", dsm_c)
+                    st.markdown(
+                        f"<div style='background-color:#f8fafc; border-left: 5px solid #64748b; padding: 12px; border-radius: 8px; text-align: center;'>"
+                        f"<p style='margin:0; font-size:0.85rem; font-weight:600; color:#334155;'>❌ Dismissed</p>"
+                        f"<h3 style='margin:5px 0 0 0; color:#475569; font-weight:700;'>{dsm_c}</h3>"
+                        f"</div>", unsafe_allow_html=True
+                    )
                 with sc3:
-                    st.metric("False Positives", fp_c)
+                    st.markdown(
+                        f"<div style='background-color:#fef2f2; border-left: 5px solid #ef4444; padding: 12px; border-radius: 8px; text-align: center;'>"
+                        f"<p style='margin:0; font-size:0.85rem; font-weight:600; color:#991b1b;'>⚠️ False Positives</p>"
+                        f"<h3 style='margin:5px 0 0 0; color:#b91c1c; font-weight:700;'>{fp_c}</h3>"
+                        f"</div>", unsafe_allow_html=True
+                    )
                 with sc4:
-                    st.metric("Pending", pending_c)
-                with sc5:
-                    if st.button("✅ Approve All Pending Gaps", type="primary", use_container_width=True):
-                        for tag in db_analysis.issue_tags:
-                            if tag.review_status != "Approve":
-                                FeedbackService.review_issue(
-                                    db=db,
-                                    issue_id=tag.id,
-                                    review_status="Approve",
-                                    reviewer_comments="Bulk approved by auditor.",
-                                    severity=tag.severity.value
-                                )
-                        st.success("Successfully bulk approved all violations!")
-                        st.rerun()
+                    st.markdown(
+                        f"<div style='background-color:#fffbeb; border-left: 5px solid #f59e0b; padding: 12px; border-radius: 8px; text-align: center;'>"
+                        f"<p style='margin:0; font-size:0.85rem; font-weight:600; color:#92400e;'>⏳ Pending Review</p>"
+                        f"<h3 style='margin:5px 0 0 0; color:#b45309; font-weight:700;'>{pending_c}</h3>"
+                        f"</div>", unsafe_allow_html=True
+                    )
                 
                 st.markdown("---")
-                
-                # Column width slider to allow custom sizing
-                left_col_ratio = st.slider("Left Panel Width Ratio:", min_value=1.0, max_value=4.0, value=1.8, step=0.1)
-                st.markdown("<br>", unsafe_allow_html=True)
                 
                 # Separate violations: Approved vs. Unapproved Gaps
                 unapproved_tags = [t for t in db_analysis.issue_tags if t.review_status != "Approve"]
                 approved_tags = [t for t in db_analysis.issue_tags if t.review_status == "Approve"]
                 
-                # Two-column layout
-                col_left, col_right = st.columns([left_col_ratio, 4.0])
+                # Two-column layout with fixed split (approx 30% left, 70% right)
+                col_left, col_right = st.columns([1.3, 2.7])
+                
+                selected_tag_ids = []
                 
                 with col_left:
                     st.markdown("###### Detected Violations")
-                    group_selection = st.radio("Category Group:", ["Pending & Active Reviews", "Approved Violations"], horizontal=True, key=f"feed_group_{call_id}")
+                    group_selection = st.radio("Category Group:", ["Pending & Active", "Approved Gaps"], horizontal=True, key=f"feed_group_{call_id}")
                     
-                    if group_selection == "Pending & Active Reviews":
+                    if group_selection == "Pending & Active":
                         target_tags = unapproved_tags
                     else:
                         target_tags = approved_tags
@@ -896,50 +943,135 @@ def render_call_details_view(call_id: int, db: Session):
                         st.info("No compliance violations in this section.")
                         selected_tag = None
                     else:
-                        violation_labels = []
-                        violation_map = {}
-                        for tag in target_tags:
-                            sev_icon = "🔴" if tag.severity.value == "Critical" else ("🟠" if tag.severity.value == "High" else ("🟡" if tag.severity.value == "Medium" else "🟢"))
-                            conf_val = int(tag.confidence) if getattr(tag, "confidence", None) is not None else 85
-                            label = f"{sev_icon} {tag.tag} ({conf_val}%)"
-                            violation_labels.append(label)
-                            violation_map[label] = tag
+                        selected_tag_idx = st.session_state.get(f"selected_tag_idx_{call_id}", 0)
+                        if selected_tag_idx >= len(target_tags):
+                            selected_tag_idx = 0
+                            st.session_state[f"selected_tag_idx_{call_id}"] = 0
                             
-                        selected_label = st.radio(
-                            "Select violation to audit:",
-                            options=violation_labels,
-                            key=f"sel_violation_{call_id}",
-                            label_visibility="collapsed"
-                        )
-                        selected_tag = violation_map[selected_label]
+                        # Styled List of cards
+                        for idx, tag in enumerate(target_tags):
+                            dot = "🔴" if tag.severity.value == "Critical" else ("🟠" if tag.severity.value == "High" else ("🟡" if tag.severity.value == "Medium" else "🔵"))
+                            conf_val = int(tag.confidence) if getattr(tag, "confidence", None) is not None else 85
+                            m_sec = f"{int(tag.timestamp // 60):02d}:{int(tag.timestamp % 60):02d}"
+                            
+                            is_active = (selected_tag_idx == idx)
+                            bg_color = "#eef2f6" if is_active else "#ffffff"
+                            border_color = "#4f46e5" if is_active else "#e2e8f0"
+                            
+                            # Render styled card container
+                            st.markdown(
+                                f"<div style='border: 2px solid {border_color}; background-color: {bg_color}; padding: 10px; border-radius: 8px; margin-bottom: 4px; font-size: 0.9em;'>"
+                                f"{dot} <strong>{tag.tag}</strong><br>"
+                                f"<span style='color: #64748b; font-size: 0.85em;'>{conf_val}% Confidence &nbsp;|&nbsp; ⏱️ {m_sec}</span><br>"
+                                f"<span style='color: #475569; font-weight: 500; font-size: 0.85em;'>Status: {tag.review_status}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
+                            
+                            col_chk, col_btn = st.columns([1, 1])
+                            with col_chk:
+                                is_checked = st.checkbox("Bulk Select", key=f"chk_bulk_{tag.id}", value=False)
+                                if is_checked:
+                                    selected_tag_ids.append(tag.id)
+                            with col_btn:
+                                if st.button("👁️ View Details", key=f"btn_view_{tag.id}", use_container_width=True):
+                                    st.session_state[f"selected_tag_idx_{call_id}"] = idx
+                                    st.rerun()
+                                    
+                            st.markdown("<hr style='margin: 8px 0; border-top: 1px dashed #cbd5e1;'>", unsafe_allow_html=True)
+                        
+                        selected_tag = target_tags[selected_tag_idx]
+                        
+                    # Bulk Actions form at the bottom of left column
+                    if selected_tag_ids:
+                        st.markdown("##### 🛠️ Bulk Actions")
+                        with st.form("bulk_actions_form_left"):
+                            bulk_action = st.selectbox("Action to Perform", ["Approve Selected", "Dismiss Selected", "Mark as False Positive", "Change Severity"])
+                            bulk_sev = st.selectbox("Severity (if changing)", ["Critical", "High", "Medium", "Low"])
+                            bulk_comment = st.text_input("Comment (Optional)")
+                            
+                            if st.form_submit_button("Apply Bulk Action", use_container_width=True, type="primary"):
+                                status_map = {
+                                    "Approve Selected": "Approve",
+                                    "Dismiss Selected": "Dismiss",
+                                    "Mark as False Positive": "False Positive"
+                                }
+                                for t_id in selected_tag_ids:
+                                    tag_ref = next((t for t in db_analysis.issue_tags if t.id == t_id), None)
+                                    if tag_ref:
+                                        status = status_map.get(bulk_action, tag_ref.review_status)
+                                        sev = bulk_sev if bulk_action == "Change Severity" else tag_ref.severity.value
+                                        FeedbackService.review_issue(
+                                            db=db,
+                                            issue_id=t_id,
+                                            review_status=status,
+                                            reviewer_comments=bulk_comment or tag_ref.reviewer_comments,
+                                            severity=sev
+                                        )
+                                st.success(f"Applied action to {len(selected_tag_ids)} items!")
+                                st.rerun()
                     
                 with col_right:
                     if not selected_tag:
-                        st.info("Select a violation to view details.")
+                        st.info("Select a violation from the list to begin audit review.")
                     else:
-                        # Section 1 - AI Decision
+                        def get_sev_color(sev: str) -> str:
+                            s = sev.lower()
+                            if s == "critical": return "#ef4444"
+                            elif s == "high": return "#f97316"
+                            elif s == "medium": return "#f59e0b"
+                            else: return "#3b82f6"
+                        
+                        sev_color = get_sev_color(selected_tag.severity.value)
+                        
+                        # Section 1 - AI Decision Card
                         st.markdown("###### Section 1 — AI Decision")
+                        st.markdown(
+                            f"<div style='border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; background-color: #ffffff; margin-bottom: 20px;'>",
+                            unsafe_allow_html=True
+                        )
                         c1, c2, c3, c4 = st.columns(4)
                         with c1:
-                            st.metric("Severity", selected_tag.severity.value)
+                            st.markdown(
+                                f"<div style='background-color:#f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; text-align: center;'>"
+                                f"<span style='font-size:0.8rem; color:#64748b;'>Severity</span>"
+                                f"<h4 style='margin:5px 0 0 0; color:{sev_color}; font-weight:700;'>{selected_tag.severity.value}</h4>"
+                                f"</div>", unsafe_allow_html=True
+                            )
                         with c2:
                             conf_pct = int(selected_tag.confidence) if getattr(selected_tag, "confidence", None) is not None else 85
-                            st.metric("AI Confidence", f"{conf_pct}%")
-                        with c3:
-                            st.metric("Status", selected_tag.review_status)
-                        with c4:
-                            st.metric("Detection", "AI Flagged")
+                            conf_label = "High Confidence" if conf_pct >= 80 else ("Medium Confidence" if conf_pct >= 50 else "Low Confidence")
                             
-                        st.markdown("---")
+                            st.markdown(
+                                f"<div style='background-color:#f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; text-align: center; margin-bottom: 4px;'>"
+                                f"<span style='font-size:0.8rem; color:#64748b;'>Confidence ({conf_pct}%)</span>"
+                                f"<h5 style='margin:2px 0 0 0; color:#10b981; font-weight:700;'>{conf_label}</h5>"
+                                f"</div>", unsafe_allow_html=True
+                            )
+                            st.progress(conf_pct / 100.0)
+                        with c3:
+                            st.markdown(
+                                f"<div style='background-color:#f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; text-align: center;'>"
+                                f"<span style='font-size:0.8rem; color:#64748b;'>Status</span>"
+                                f"<h4 style='margin:5px 0 0 0; color:#4f46e5; font-weight:700;'>{selected_tag.review_status}</h4>"
+                                f"</div>", unsafe_allow_html=True
+                            )
+                        with c4:
+                            st.markdown(
+                                f"<div style='background-color:#f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; text-align: center;'>"
+                                f"<span style='font-size:0.8rem; color:#64748b;'>Detection</span>"
+                                f"<h4 style='margin:5px 0 0 0; color:#0f172a; font-weight:700;'>AI Flagged</h4>"
+                                f"</div>", unsafe_allow_html=True
+                            )
+                        st.markdown("</div>", unsafe_allow_html=True) # End card
                         
-                        # Section 2 - Why AI Flagged This
-                        st.markdown("###### Section 2 — Why AI Flagged This")
-                        st.markdown(f"**Reason:**\n{selected_tag.reason}")
+                        # Section 2 & 3 - Why AI Flagged & Transcript Evidence
+                        st.markdown("###### Section 2 — Transcript Evidence & AI Observation")
+                        st.markdown(
+                            f"<div style='border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; background-color: #ffffff; margin-bottom: 20px;'>",
+                            unsafe_allow_html=True
+                        )
                         
-                        st.markdown("---")
-                        
-                        # Section 3 - Transcript Evidence
-                        st.markdown("###### Section 3 — Transcript Evidence")
                         import json
                         evidence = []
                         if getattr(selected_tag, "evidence_segments", None):
@@ -951,26 +1083,51 @@ def render_call_details_view(call_id: int, db: Session):
                         if evidence:
                             for seg in evidence:
                                 raw_start = seg.get("start_time", 0.0)
-                                m_sec = f"{int(raw_start // 60):02d}:{int(raw_start % 60):02d}"
+                                raw_end = seg.get("end_time", 0.0)
+                                m_start = f"{int(raw_start // 60):02d}:{int(raw_start % 60):02d}"
+                                m_end = f"{int(raw_end // 60):02d}:{int(raw_end % 60):02d}"
                                 
                                 st.markdown(
-                                    f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
-                                    f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> "
-                                    f"<strong style='color: #1e293b;'>{seg.get('speaker', 'Speaker')}:</strong> {seg.get('transcript_text', '')}"
+                                    f"<div style='border-left: 4px solid {sev_color}; background-color: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 12px;'>"
+                                    f"<div style='font-size: 0.8rem; color: #64748b; font-weight: bold;'>⏱️ {m_start} – {m_end}</div>"
+                                    f"<strong style='color: #0f172a; font-size: 0.95rem;'>{seg.get('speaker', 'Speaker')}:</strong> "
+                                    f"<span style='color: #1e293b; font-size: 0.95rem;'>{seg.get('transcript_text', '')}</span>"
                                     f"</div>", unsafe_allow_html=True
                                 )
                         else:
                             m_sec = f"{int(selected_tag.timestamp // 60):02d}:{int(selected_tag.timestamp % 60):02d}"
                             st.markdown(
-                                f"<div style='border-left: 4px solid #ef4444; background-color: #fef2f2; padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; font-family: monospace;'>"
-                                f"<span style='color: #ef4444; font-weight: bold;'>[{m_sec}]</span> {selected_tag.quote}"
+                                f"<div style='border-left: 4px solid {sev_color}; background-color: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 12px;'>"
+                                f"<div style='font-size: 0.8rem; color: #64748b; font-weight: bold;'>⏱️ {m_sec}</div>"
+                                f"<span style='color: #1e293b; font-size: 0.95rem;'>{selected_tag.quote}</span>"
                                 f"</div>", unsafe_allow_html=True
                             )
                             
-                        st.markdown("---")
+                        # AI Explanation / Observation box
+                        st.markdown(
+                            f"<div style='background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px; border-radius: 8px; margin-top: 16px;'>"
+                            f"<strong style='color: #166534; font-size: 0.95rem;'>🔍 AI Explanation</strong>"
+                            f"<p style='margin: 8px 0 0 0; color: #1e293b; font-size: 0.92rem;'>{selected_tag.reason}</p>"
+                            f"</div>", unsafe_allow_html=True
+                        )
                         
-                        # Section 4 - Reviewer Decision
-                        st.markdown("###### Section 4 — Reviewer Decision")
+                        # Add Navigation button to scroll to transcript
+                        btn_col1, btn_col2 = st.columns([1.2, 1.8])
+                        with btn_col1:
+                            if st.button("📍 View in Full Transcript", key=f"btn_nav_tr_{selected_tag.id}", use_container_width=True):
+                                # Set target highlight states and switch active tab
+                                st.session_state["active_detail_tab"] = "Speech Transcript"
+                                st.session_state["highlight_timestamp"] = selected_tag.timestamp if not evidence else evidence[0]["start_time"]
+                                st.rerun()
+                                
+                        st.markdown("</div>", unsafe_allow_html=True) # End card
+                        
+                        # Section 4 - Reviewer Decision Card
+                        st.markdown("###### Section 3 — Auditor Actions")
+                        st.markdown(
+                            f"<div style='border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; background-color: #ffffff; margin-bottom: 20px;'>",
+                            unsafe_allow_html=True
+                        )
                         with st.form(f"form_single_violation_review_{selected_tag.id}"):
                             col_dec1, col_dec2 = st.columns(2)
                             with col_dec1:
@@ -984,10 +1141,9 @@ def render_call_details_view(call_id: int, db: Session):
                                 sev_idx = sev_opts.index(cur_sev) if cur_sev in sev_opts else 2
                                 severity_val = st.selectbox("Severity Override", sev_opts, index=sev_idx)
                                 
-                            comment_val = st.text_area("Reviewer Comment", value=getattr(selected_tag, "reviewer_comments", "") or "")
+                            comment_val = st.text_area("Auditor Comment", value=getattr(selected_tag, "reviewer_comments", "") or "")
                             
-                            # Section 6 - Save Review
-                            submitted = st.form_submit_button("Save Review", use_container_width=True)
+                            submitted = st.form_submit_button("Save Decisions", use_container_width=True)
                             if submitted:
                                 FeedbackService.review_issue(
                                     db=db,
@@ -996,16 +1152,26 @@ def render_call_details_view(call_id: int, db: Session):
                                     reviewer_comments=comment_val,
                                     severity=severity_val
                                 )
-                                st.success(f"Successfully saved review for {selected_tag.tag}!")
+                                st.success(f"Successfully saved review!")
                                 st.rerun()
-                                
-                        st.markdown("---")
+                        st.markdown("</div>", unsafe_allow_html=True) # End card
                         
-                        # Section 5 - AI Recommendation
-                        st.markdown("###### Section 5 — AI Coaching Suggestions")
-                        st.info(getattr(selected_tag, 'recommendation', 'N/A') or 'N/A')
-            else:
-                st.success("No compliance issue violations to review for this call.")
+                        # Section 5 - AI Coaching suggestions (Try / Instead format)
+                        st.markdown("###### Section 4 — Actionable AI Coaching Suggestion")
+                        st.markdown(
+                            f"<div style='border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; background-color: #ffffff; margin-bottom: 20px;'>",
+                            unsafe_allow_html=True
+                        )
+                        instead_text = selected_tag.quote if selected_tag.quote else (evidence[0].get("transcript_text", "") if evidence else "Generic violation behavior")
+                        st.markdown(
+                            f"<div style='background-color:#eff6ff; border: 1px solid #bfdbfe; padding: 14px; border-radius: 8px;'>"
+                            f"<span style='color: #ef4444; font-weight: bold;'>❌ Instead of saying:</span>"
+                            f"<p style='margin: 4px 0 10px 18px; font-style: italic; color: #475569;'>\"{instead_text}\"</p>"
+                            f"<span style='color: #10b981; font-weight: bold;'>✅ Try:</span>"
+                            f"<p style='margin: 4px 0 0 18px; font-weight: 500; color: #1e293b;'>{selected_tag.recommendation}</p>"
+                            f"</div>", unsafe_allow_html=True
+                        )
+                        st.markdown("</div>", unsafe_allow_html=True) # End card
 
         with sub_tab2:
             st.markdown("##### 2. Quality Score Manual Override")
@@ -1033,9 +1199,9 @@ def render_call_details_view(call_id: int, db: Session):
         with sub_tab3:
             st.markdown("##### 3. Trigger Gemini AI Re-Evaluation")
             st.info("Re-run Needs Discovery checklist, Objection handling, and Compliance scorecards on the human dialogue transcripts.")
-            has_completed_review = any(t.review_status != "Pending" for t in db_analysis.issue_tags) if db_analysis and db_analysis.issue_tags else False
             
-            if st.button("Run AI Re-analysis", type="primary", use_container_width=True, disabled=not has_completed_review):
+            # Always enabled re-analysis button
+            if st.button("Run AI Re-analysis", type="primary", use_container_width=True):
                 with st.spinner("Executing multi-agent Gemini scoring pipeline..."):
                     try:
                         FeedbackService.reanalyze(db, call_id)
